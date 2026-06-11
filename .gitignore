@@ -1,0 +1,12 @@
+# 构建产物
+build/
+
+# 构建工具 (体积大，自行下载)
+tools/*.jar
+tools/*.keystore
+tools/*.apk
+tools/platform-tools/
+tools/platform-tools.zip
+
+# 服务端生成的 .love 文件 (由 server.py 自动生成)
+server/games/*.love
