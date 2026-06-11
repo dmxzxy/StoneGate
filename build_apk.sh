@@ -240,20 +240,22 @@ fi
 if [ "$RELEASE" = true ] && [ -f "$KEYSTORE" ]; then
     echo "[签名] release keystore..."
     "$JAVA" -jar "$SIGNER" -a "$UNSIGNED" \
-        --ks "$KEYSTORE" --ksAlias stonegate --out "$BUILD_DIR/" 2>&1 | tail -3
+        --ks "$KEYSTORE" --ksAlias stonegate \
+        --ksPass stonegate --ksKeyPass stonegate \
+        --out "$BUILD_DIR/" 2>&1 | tail -3
 else
     echo "[签名] debug..."
     "$JAVA" -jar "$SIGNER" -a "$UNSIGNED" --out "$BUILD_DIR/" 2>&1 | tail -3
 fi
 
-# 找到签名后的 APK
-FINAL_APK=$(ls -t "$BUILD_DIR/"*-aligned-*Signed.apk 2>/dev/null | head -1)
+# 找到签名后的 APK (uber-apk-signer 输出文件名含 -aligned-signed 或 -aligned-debugSigned)
+FINAL_APK=$(ls -t "$BUILD_DIR/"*-aligned-*igned.apk 2>/dev/null | head -1)
 if [ -n "$FINAL_APK" ]; then
     FRIENDLY="$BUILD_DIR/stonegate_v${VERSION_NAME}.apk"
     cp "$FINAL_APK" "$FRIENDLY"
     # 清理中间文件
     rm -f "$UNSIGNED"
-    rm -f "$BUILD_DIR/"*-aligned-*Signed.apk "$BUILD_DIR/"*-aligned-*Signed.apk.idsig 2>/dev/null || true
+    rm -f "$BUILD_DIR/"*-aligned-*igned.apk "$BUILD_DIR/"*-aligned-*igned.apk.idsig 2>/dev/null || true
 
     echo ""
     echo "========================================="
