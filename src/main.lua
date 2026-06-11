@@ -249,9 +249,9 @@ function love.load()
     love.filesystem.createDirectory(config.download_dir)
     love.filesystem.createDirectory(config.thumbnail_dir)
 
-    -- Load font
-    local font = love.graphics.newFont(18)
-    love.graphics.setFont(font)
+    -- Initialize UI (loads fonts, etc.)
+    ui.init()
+    love.graphics.setFont(love.graphics.newFont(17))
 
     -- Start download thread
     init_download_thread()

@@ -16,18 +16,28 @@ local config = {
     -- Keys that exit a running game back to the shell
     back_keys = { escape = true, back = true },
 
-    -- Theme colors (RGB, 0-1)
+    -- Theme colors (RGB, 0-1) — refined dark palette with depth
     colors = {
-        bg          = { 0.08, 0.08, 0.12 },
-        card        = { 0.15, 0.16, 0.22 },
-        card_border = { 0.25, 0.27, 0.35 },
-        accent      = { 0.25, 0.55, 1.00 },
-        text        = { 0.92, 0.92, 0.96 },
-        text_dim    = { 0.50, 0.52, 0.60 },
-        success     = { 0.25, 0.75, 0.40 },
-        warning     = { 0.95, 0.65, 0.15 },
-        danger      = { 0.85, 0.25, 0.25 },
-        placeholder = { 0.12, 0.13, 0.18 },
+        bg            = { 0.06, 0.06, 0.10 },
+        bg_surface    = { 0.09, 0.09, 0.14 },   -- slightly lighter surface
+        card          = { 0.12, 0.13, 0.19 },
+        card_hi       = { 0.16, 0.17, 0.24 },   -- card highlight line (top edge)
+        card_border   = { 0.18, 0.20, 0.28 },
+        shadow        = { 0.00, 0.00, 0.00 },    -- shadows use alpha separately
+        accent        = { 0.35, 0.65, 1.00 },
+        accent_dim    = { 0.20, 0.40, 0.75 },
+        accent_glow   = { 0.40, 0.70, 1.00 },
+        text          = { 0.95, 0.95, 1.00 },
+        text_sub      = { 0.70, 0.72, 0.82 },
+        text_dim      = { 0.42, 0.44, 0.54 },
+        success       = { 0.22, 0.82, 0.52 },
+        success_dim   = { 0.14, 0.28, 0.22 },
+        warning       = { 1.00, 0.72, 0.22 },
+        warning_dim   = { 0.30, 0.22, 0.10 },
+        danger        = { 0.92, 0.32, 0.32 },
+        danger_dim    = { 0.30, 0.12, 0.12 },
+        placeholder   = { 0.08, 0.09, 0.14 },
+        divider       = { 0.15, 0.16, 0.22 },
     },
 }
 
