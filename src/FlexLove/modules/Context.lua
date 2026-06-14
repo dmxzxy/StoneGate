@@ -1,0 +1,355 @@
+---@class Context
+local modulePath = (...):match("(.-)[^%.]+$")
+local ZIndex = require(modulePath .. "ZIndex")
+local Context = {
+  topElements = {},
+  -- Base scale configuration
+  baseScale = nil, -- {width: number, height: number}
+  -- Current scale factors
+  scaleFactors = { x = 1.0, y = 1.0 },
+  defaultTheme = nil,
+  _focusedElement = nil,
+  _focusedElementId = nil, -- Stable id used to rehydrate focus across immediate-mode frames
+  _activeEventElement = nil,
+  _cachedViewport = { width = 0, height = 0 },
+  -- Immediate mode state
+  _immediateMode = false,
+  _frameNumber = 0,
+  _currentFrameElements = {},
+  _immediateModeState = nil, -- Will be initialized if immediate mode is enabled
+  _frameStarted = false,
+  _autoBeganFrame = false,
+  -- Z-index ordered element tracking for immediate mode
+  _zIndexOrderedElements = {}, -- Array of elements sorted by z-index (lowest to highest)
+  -- Focus management guard
+  _settingFocus = false,
+  -- Hook called whenever focus changes: function(element) or nil
+  _onFocusChanged = nil,
+
+  -- Navigation state
+  _navigationContext = {
+    lastFocusedElement = nil, -- For returning from modals
+    navigationMode = "sequential", -- "sequential" or "directional"
+    containerElement = nil, -- Current navigation container
+  },
+
+  initialized = false,
+
+  -- Debug draw overlay
+  _debugDraw = false,
+  _debugDrawKey = nil,
+
+  -- Initialization state tracking
+  ---@type "uninitialized"|"initializing"|"ready"
+  _initState = "uninitialized",
+  ---@type table[] Queue of {props: ElementProps, callback: function(element)|nil}
+  _initQueue = {},
+}
+
+---@return number, number -- scaleX, scaleY
+function Context.getScaleFactors()
+  return Context.scaleFactors.x, Context.scaleFactors.y
+end
+
+--- Register an element in the z-index ordered tree (for immediate mode)
+---@param element Element The element to register
+function Context.registerElement(element)
+  if not Context._immediateMode then
+    return
+  end
+
+  table.insert(Context._zIndexOrderedElements, element)
+end
+
+function Context.clearFrameElements()
+  Context._zIndexOrderedElements = {}
+end
+
+--- Calculate the depth (nesting level) of an element
+---@param elem Element
+---@return number
+local function getElementDepth(elem)
+  local depth = 0
+  local current = elem.parent
+  while current do
+    depth = depth + 1
+    current = current.parent
+  end
+  return depth
+end
+
+--- Sort elements by z-index (called after all elements are registered)
+---
+--- Sorting uses a composite key: rootZ * ROOT_WEIGHT + depth * DEPTH_WEIGHT + ownZ
+---
+--- ROOT_WEIGHT (10^10) gives the top-level ancestor's z-index 10 digits of significance.
+--- DEPTH_WEIGHT (10^3) gives nesting depth 3 digits, ensuring children always sort above
+--- their ancestors. The element's own z (capped to ±999 by ZIndex.clamp) fits within the
+--- remaining 3 digits without interfering with the depth component.
+---
+--- These weights assume |z| <= ZIndex.MAX_Z and practical tree depths (< 10^7), which
+--- keeps the composite key well within Lua's exact integer range (2^53 ≈ 9 × 10^15).
+function Context.sortElementsByZIndex()
+  table.sort(Context._zIndexOrderedElements, function(a, b)
+    local function getEffectiveZIndex(elem)
+      local rootZ = elem.z or 0
+      local current = elem.parent
+      while current do
+        rootZ = current.z or 0
+        current = current.parent
+      end
+      local depth = getElementDepth(elem)
+      local ownZ = elem.z or 0
+      return rootZ * ZIndex.ROOT_WEIGHT + depth * ZIndex.DEPTH_WEIGHT + ownZ
+    end
+
+    local za = getEffectiveZIndex(a)
+    local zb = getEffectiveZIndex(b)
+    if za ~= zb then
+      return za < zb
+    end
+    return getElementDepth(a) < getElementDepth(b)
+  end)
+end
+
+--- Check if a point is inside an element's bounds, respecting scroll and clipping
+---@param element Element The element to check
+---@param x number Screen X coordinate
+---@param y number Screen Y coordinate
+---@return boolean True if point is inside element bounds
+local function isPointInElement(element, x, y)
+  local bx = element.x
+  local by = element.y
+  local bw = element._borderBoxWidth or (element.width + element.padding.left + element.padding.right)
+  local bh = element._borderBoxHeight or (element.height + element.padding.top + element.padding.bottom)
+
+  -- Calculate scroll offset from parent chain
+  local scrollOffsetX = 0
+  local scrollOffsetY = 0
+
+  -- Walk up parent chain to check clipping and accumulate scroll offsets
+  local current = element.parent
+  while current do
+    local overflowX = current.overflowX or current.overflow
+    local overflowY = current.overflowY or current.overflow
+
+    -- Check if parent clips content (overflow: hidden, scroll, auto)
+    if
+      overflowX == "hidden"
+      or overflowX == "scroll"
+      or overflowX == "auto"
+      or overflowY == "hidden"
+      or overflowY == "scroll"
+      or overflowY == "auto"
+    then
+      local parentX = current.x + current.padding.left
+      local parentY = current.y + current.padding.top
+      local parentW = current.width
+      local parentH = current.height
+
+      if x < parentX or x > parentX + parentW or y < parentY or y > parentY + parentH then
+        return false -- Point is clipped by parent
+      end
+
+      -- Accumulate scroll offset
+      scrollOffsetX = scrollOffsetX + (current._scrollX or 0)
+      scrollOffsetY = scrollOffsetY + (current._scrollY or 0)
+    end
+
+    current = current.parent
+  end
+
+  -- Adjust mouse position by scroll offset for hit testing
+  local adjustedX = x + scrollOffsetX
+  local adjustedY = y + scrollOffsetY
+
+  return adjustedX >= bx and adjustedX <= bx + bw and adjustedY >= by and adjustedY <= by + bh
+end
+
+--- Get the topmost element at a screen position
+---@param x number Screen X coordinate
+---@param y number Screen Y coordinate
+---@return Element|nil The topmost element at the position, or nil if none
+function Context.getTopElementAt(x, y)
+  if not Context._immediateMode then
+    return nil
+  end
+
+  -- Helper function to find the first interactive ancestor (including self)
+  local function findInteractiveAncestor(elem)
+    local current = elem
+    while current do
+      -- An element is interactive if it has an onEvent handler, themeComponent, or is editable
+      if current.onEvent or current.themeComponent or current.editable then
+        return current
+      end
+      current = current.parent
+    end
+    return nil
+  end
+
+  local fallback = nil
+  for i = #Context._zIndexOrderedElements, 1, -1 do
+    local element = Context._zIndexOrderedElements[i]
+
+    if isPointInElement(element, x, y) then
+      local interactive = findInteractiveAncestor(element)
+      if interactive then
+        return interactive
+      end
+      -- Non-interactive element hit: remember as fallback but keep looking
+      -- for interactive children/siblings at same or lower z-index
+      if not fallback then
+        fallback = element
+      end
+    end
+  end
+
+  return fallback
+end
+
+--- Set the focused element (centralizes focus management)
+--- Automatically blurs the previously focused element if different
+---@param element Element|nil The element to focus (nil to clear focus)
+function Context.setFocused(element)
+  if Context._focusedElement == element then
+    return -- Already focused
+  end
+
+  -- Prevent re-entry during focus change
+  if Context._settingFocus then
+    return
+  end
+  Context._settingFocus = true
+
+  -- Save reference to previously focused element before updating
+  local oldFocusedElement = Context._focusedElement
+
+  -- Blur previously focused element
+  if oldFocusedElement and oldFocusedElement ~= element then
+    if oldFocusedElement._textEditor then
+      oldFocusedElement._textEditor:blur(oldFocusedElement)
+    end
+  end
+
+  -- Set new focused element and persist its id for immediate-mode rehydration
+  Context._focusedElement = element
+  Context._focusedElementId = element and (element.id ~= "" and element.id or nil) or nil
+
+  -- Notify any registered focus change hook (e.g. FocusIndicator)
+  if Context._onFocusChanged then
+    Context._onFocusChanged(element)
+  end
+
+  -- Focus the new element's text editor if it has one
+  if element and element._textEditor then
+    element._textEditor._focused = true
+  end
+
+  Context._settingFocus = false
+end
+
+--- Recursively search for an element by id in an element tree
+---@param root Element The root element to start searching from
+---@param targetId string The id to search for
+---@return Element|nil The element with the matching id, or nil if not found
+local function findElementById(root, targetId)
+  if root.id == targetId then
+    return root
+  end
+  for _, child in ipairs(root.children or {}) do
+    local found = findElementById(child, targetId)
+    if found then
+      return found
+    end
+  end
+  return nil
+end
+
+--- Rehydrate _focusedElement from _focusedElementId by scanning live elements.
+--- Called at the start of getFocused() in immediate mode so stale references
+--- are always replaced with the current-frame object before use.
+function Context._rehydrateFocus()
+  if not Context._focusedElementId then
+    Context._focusedElement = nil
+    return
+  end
+
+  -- First, try a fast linear search through all registered elements
+  for _, elem in ipairs(Context._zIndexOrderedElements) do
+    if elem.id == Context._focusedElementId then
+      Context._focusedElement = elem
+      return
+    end
+  end
+
+  -- If not found, recursively search from top-level elements
+  -- This handles cases where elements may not be in _zIndexOrderedElements
+  for _, topLevel in ipairs(Context.topElements or {}) do
+    local found = findElementById(topLevel, Context._focusedElementId)
+    if found then
+      Context._focusedElement = found
+      return
+    end
+  end
+
+  -- Element with that id is not present this frame (e.g. screen changed)
+  Context._focusedElement = nil
+end
+
+--- Get the currently focused element
+---@return Element|nil The focused element, or nil if none
+function Context.getFocused()
+  if Context._immediateMode then
+    Context._rehydrateFocus()
+  end
+  return Context._focusedElement
+end
+
+--- Clear focus from any element
+function Context.clearFocus()
+  Context._focusedElementId = nil
+  Context.setFocused(nil)
+end
+
+-- ====================
+-- Navigation Context
+-- ====================
+
+--- Get the navigation context
+---@return table
+function Context.getNavigationContext()
+  return Context._navigationContext
+end
+
+--- Push current focus onto stack (for modals/dialogs)
+---@param element Element?
+function Context.pushFocusStack(element)
+  Context._navigationContext.lastFocusedElement = Context._focusedElement
+  if element then
+    Context.setFocused(element)
+  end
+end
+
+--- Pop focus from stack (return from modal)
+---@return Element?
+function Context.popFocusStack()
+  local previous = Context._navigationContext.lastFocusedElement
+  Context._navigationContext.lastFocusedElement = nil
+  Context.setFocused(previous)
+  return previous
+end
+
+--- Set navigation container (scope for tab navigation)
+---@param element Element?
+function Context.setNavigationContainer(element)
+  Context._navigationContext.containerElement = element
+end
+
+--- Get navigation container
+---@return Element?
+function Context.getNavigationContainer()
+  return Context._navigationContext.containerElement
+end
+
+return Context

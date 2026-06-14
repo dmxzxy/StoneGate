@@ -18,6 +18,11 @@ local config = require("config")
 local shell = {}
 -- Saved require path (restored when game exits)
 local saved_require_path = nil
+-- Snapshot of package.loaded keys taken at launch, so we can unload the game's
+-- own required modules on exit. Lua caches loaded modules in package.loaded; if
+-- we don't clear them, an UPDATED game's modules go stale across launches in the
+-- same process (the new main.lua then reads the old module → nil-field crashes).
+local saved_package_loaded = nil
 -- Currently mounted game info
 local mounted = nil
 -- Callback invoked after exiting a game
@@ -104,8 +109,11 @@ function game_loader.launch(game_id)
     save_shell_callbacks()
     log("Shell callbacks saved")
 
-    -- Use a unique mount point to avoid shadowing shell files
-    local mount_point = "__game_" .. game_id .. "__"
+    -- Mount to root (empty mount_point) so the game's bare paths like
+    -- 'assets/font.ttf' resolve against the mounted .love contents.
+    -- Previous '__game_<id>__' mount point broke games that use bare asset paths
+    -- (they only work for require() because we also patch setRequirePath).
+    local mount_point = ""
 
     local ok, mount_err = love.filesystem.mount(love_path, mount_point, false)
     if not ok then
@@ -113,16 +121,18 @@ function game_loader.launch(game_id)
         restore_shell_callbacks()
         return nil, "Mount failed: " .. tostring(mount_err)
     end
-    log("Mounted OK at: " .. mount_point)
+    log("Mounted OK at root (mount_point='')")
 
     -- Save and modify require path so the game's require() finds its modules
     saved_require_path = love.filesystem.getRequirePath()
+    -- mount_point is now "" so the require path entries become bare '/?.lua'
+    -- which resolves against the mounted .love root.
     love.filesystem.setRequirePath(
-        mount_point .. "/?.lua;"
-        .. mount_point .. "/?/init.lua;"
+        "?.lua;"
+        .. "?/init.lua;"
         .. saved_require_path
     )
-    log("Require path set to include: " .. mount_point)
+    log("Require path set to bare (mounted at root)")
 
     mounted = {
         id          = game_id,
@@ -130,13 +140,18 @@ function game_loader.launch(game_id)
         mount_point = mount_point,
     }
 
+    -- Snapshot which modules are already loaded so we can drop the game's own
+    -- modules on exit (prevents stale-module crashes after a game update).
+    saved_package_loaded = {}
+    for k in pairs(package.loaded) do saved_package_loaded[k] = true end
+
     -- Clear all callbacks so the game starts from a clean slate
     clear_callbacks()
 
     -- Locate the game's main.lua inside the mount point
-    local main_path = mount_point .. "/main.lua"
+    local main_path = "main.lua"
     if not love.filesystem.getInfo(main_path) then
-        main_path = mount_point .. "/src/main.lua"
+        main_path = "src/main.lua"
     end
 
     log("Loading: " .. main_path)
@@ -148,6 +163,12 @@ function game_loader.launch(game_id)
         return nil, "Load main.lua failed: " .. tostring(load_err)
     end
     log("Chunk loaded OK")
+
+    -- Expose a global exit hook so games can return to the shell via an
+    -- on-screen button (useful on devices with no physical back key).
+    -- Games call:  stonegate_exit()  or  love.exit_to_shell()
+    _G.stonegate_exit = function() game_loader.exit() end
+    love.exit_to_shell = _G.stonegate_exit
 
     local ok2, run_err = pcall(chunk)
     if not ok2 then
@@ -224,6 +245,10 @@ function game_loader.exit()
 
     log("Exiting game: " .. mounted.id)
 
+    -- Remove the exit hook we exposed to the game
+    _G.stonegate_exit = nil
+    love.exit_to_shell = nil
+
     -- Try to fire the game's quit handler
     if love.quit then pcall(love.quit) end
 
@@ -231,6 +256,15 @@ function game_loader.exit()
     if saved_require_path then
         love.filesystem.setRequirePath(saved_require_path)
         saved_require_path = nil
+    end
+
+    -- Unload the game's required modules so an updated game gets fresh code on
+    -- its next launch (Lua otherwise caches them in package.loaded).
+    if saved_package_loaded then
+        for k in pairs(package.loaded) do
+            if not saved_package_loaded[k] then package.loaded[k] = nil end
+        end
+        saved_package_loaded = nil
     end
 
     -- Unmount the .love file

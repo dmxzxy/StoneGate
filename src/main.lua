@@ -1,7 +1,7 @@
--- main.lua - StoneGate entry point and state machine
+-- main.lua - StoneGate entry point and state machine (FlexLove edition)
 
 --------------------------------------------------------------------------------
--- Debug logging — writes to stonegate.log in save directory
+-- Debug logging 闂?writes to stonegate.log in save directory
 --------------------------------------------------------------------------------
 local function log(msg)
     local ts = os.date("%H:%M:%S")
@@ -11,12 +11,31 @@ local function log(msg)
     if f then f:write(line) f:close() end
 end
 
+--------------------------------------------------------------------------------
+-- Global error handler — defined EARLY (before any require) so that a crash
+-- during module loading (e.g. a syntax error in a required file) is also
+-- captured with a full traceback in crash.log. Without this, a startup-time
+-- crash falls back to LÖVE's default handler and stonegate.log is never
+-- written, making diagnosis very hard.
+--------------------------------------------------------------------------------
+function love.errhand(msg)
+    local tb = debug.traceback(tostring(msg), 2)
+    pcall(log, "!!! FATAL ERROR: " .. tb)
+    local ok, f = pcall(io.open, love.filesystem.getSaveDirectory() .. "/crash.log", "w")
+    if ok and f then
+        f:write("StoneGate crashed at " .. os.date() .. "\n")
+        f:write(tb .. "\n")
+        f:close()
+    end
+end
+
 local config      = require("config")
 local json        = require("json")
 local http        = require("http")
 local updater     = require("updater")
 local game_loader = require("game_loader")
 local ui          = require("ui")
+local FlexLove    = require("FlexLove")
 
 log("=== StoneGate starting ===")
 
@@ -24,6 +43,7 @@ log("=== StoneGate starting ===")
 -- State
 --------------------------------------------------------------------------------
 local state    = "loading"   -- loading | menu | downloading | playing | error
+local last_dim_w, last_dim_h = 0, 0  -- track screen size changes
 local games    = {}          -- game list from server
 local installed = {}         -- manifest: { [id] = {version, file} }
 local err_msg  = ""
@@ -82,7 +102,7 @@ local function load_thumbnails(game_list)
             if not love.filesystem.getInfo(thumb_path) then
                 updater.download_thumbnail(game.thumbnail, thumb_path)
             end
-            -- Load as LÖVE image
+            -- Load as L闂備胶鍘ч顓炩枍婵?image
             if love.filesystem.getInfo(thumb_path) then
                 local ok, img = pcall(love.graphics.newImage, thumb_path)
                 if ok and img then
@@ -94,43 +114,59 @@ local function load_thumbnails(game_list)
 end
 
 --------------------------------------------------------------------------------
--- Game loader callback — called when user exits a game back to the shell
+-- State transition helper
+--------------------------------------------------------------------------------
+local function set_state(new_state)
+    state = new_state
+    ui.set_state(new_state)
+end
+
+--------------------------------------------------------------------------------
+-- Game loader callback 闂?called when user exits a game back to the shell
 --------------------------------------------------------------------------------
 game_loader.set_on_exit(function()
     local crash = game_loader.get_crash_error()
     if crash then
-        -- Game crashed — show error with details
-        state = "error"
+        -- Game crashed 闂?show error with details
         err_msg = "Game crashed"
         err_detail = crash
+        ui.update_error(err_msg, err_detail)
+        set_state("error")
         log("Game crashed: " .. crash)
     else
         -- Normal exit
-        state = "menu"
+        set_state("menu")
         log("Returned to menu normally")
     end
     installed = updater.scan_installed()
-    ui.reset_scroll()
+    -- Rebuild UI with current dimensions after game exit
+    local w, h = love.graphics.getDimensions()
+    ui.resize(w, h)
+    FlexLove.resize()
+    if not crash then
+        ui.rebuild_cards(games, installed, thumbnails)
+    end
 end)
 
 --------------------------------------------------------------------------------
 -- Fetch game list from server
 --------------------------------------------------------------------------------
 local function fetch_list()
-    state = "loading"
+    set_state("loading")
     local ok, list_or_err = pcall(updater.fetch_list)
     if ok and list_or_err then
         games = list_or_err
         installed = updater.scan_installed()
         -- Download and load thumbnails (small files, synchronous is fine on LAN)
         load_thumbnails(games)
-        state = "menu"
-        ui.reset_scroll()
+        set_state("menu")
+        ui.rebuild_cards(games, installed, thumbnails)
         log("Fetched " .. #games .. " games successfully")
     else
         err_msg = (not ok and tostring(list_or_err)) or list_or_err or "Unknown error"
         err_detail = ""
-        state = "error"
+        ui.update_error(err_msg, err_detail)
+        set_state("error")
         log("Fetch FAILED: " .. err_msg)
     end
 end
@@ -148,7 +184,8 @@ local function start_download(game_id)
 
     dl_game = game
     dl_progress = 0
-    state = "downloading"
+    ui.update_download(dl_game, dl_progress)
+    set_state("downloading")
 
     -- Ensure games directory exists
     love.filesystem.createDirectory(config.download_dir)
@@ -181,21 +218,24 @@ local function process_download_results()
         if not msg then break end
 
         if msg.action == "progress" and state == "downloading" then
-            -- Update progress — we may not know total size, so show bytes
+            -- Update progress 闂?we may not know total size, so show bytes
             dl_progress = msg.downloaded
+            ui.update_download(dl_game, dl_progress)
         elseif msg.action == "done" then
             if msg.ok then
-                -- Download succeeded — register in manifest
+                -- Download succeeded 闂?register in manifest
                 local dest = config.download_dir .. "/" .. msg.game_id .. ".love"
                 updater.register_download(dl_game, dest)
                 installed = updater.scan_installed()
-                state = "menu"
+                set_state("menu")
+                ui.rebuild_cards(games, installed, thumbnails)
                 log("Download complete: " .. msg.game_id .. " (" .. msg.size .. " bytes)")
             else
                 -- Download failed
                 err_msg = "Download failed: " .. (msg.err or "unknown")
                 err_detail = ""
-                state = "error"
+                ui.update_error(err_msg, err_detail)
+                set_state("error")
                 log("Download FAILED: " .. err_msg)
             end
         elseif msg.action == "fatal" then
@@ -205,26 +245,30 @@ local function process_download_results()
 end
 
 --------------------------------------------------------------------------------
--- Handle an action returned by the UI layer
+-- Handle an action from the UI layer
 --------------------------------------------------------------------------------
 local function handle_action(action, game_id)
     if not action then return end
     log("Action: " .. action .. " game: " .. tostring(game_id))
 
-    if action == "play" then
-        state = "playing"
+    if action == "refresh" or action == "retry" then
+        fetch_list()
+    elseif action == "play" then
+        set_state("playing")
         log("Launching game: " .. game_id)
         local ok, err = pcall(game_loader.launch, game_id)
         if not ok then
             err_msg = "Launch pcall error: " .. tostring(err)
             err_detail = ""
-            state = "error"
+            ui.update_error(err_msg, err_detail)
+            set_state("error")
             log("PLAY PCALL ERROR: " .. tostring(err))
         elseif not err then
             -- launch returned nil (failure)
             err_msg = "Launch failed"
             err_detail = game_loader.get_crash_error() or ""
-            state = "error"
+            ui.update_error(err_msg, err_detail)
+            set_state("error")
             log("PLAY RETURNED NIL")
         else
             log("Game launched OK")
@@ -235,6 +279,7 @@ local function handle_action(action, game_id)
         log("Removing game: " .. game_id)
         updater.remove_game(game_id)
         installed = updater.scan_installed()
+        ui.rebuild_cards(games, installed, thumbnails)
     end
 end
 
@@ -249,8 +294,16 @@ function love.load()
     love.filesystem.createDirectory(config.download_dir)
     love.filesystem.createDirectory(config.thumbnail_dir)
 
-    -- Initialize UI (loads fonts, etc.)
-    ui.init()
+    -- Initialize FlexLove
+    FlexLove.init()
+
+    -- Initialize UI
+    log("FlexLove.initialized = " .. tostring(FlexLove.initialized) .. " initState=" .. tostring(FlexLove._initState))
+    ui.init(function(action, game_id)
+        handle_action(action, game_id)
+    end)
+
+    -- Set default font
     love.graphics.setFont(love.graphics.newFont(17))
 
     -- Start download thread
@@ -264,92 +317,51 @@ function love.load()
     log("State after fetch: " .. state .. " (games: " .. #games .. ")")
 end
 
-function love.draw()
-    local ok, err = pcall(function()
-        if state == "loading" then
-            ui.draw_loading()
-        elseif state == "menu" then
-            ui.draw_menu(games, installed, thumbnails)
-        elseif state == "downloading" then
-            ui.draw_downloading(dl_game, dl_progress)
-        elseif state == "playing" then
-            -- The loaded game draws itself via its own love.draw
-        elseif state == "error" then
-            ui.draw_error(err_msg, err_detail)
-        end
-    end)
-    if not ok then log("DRAW ERROR: " .. tostring(err)) end
-end
-
 function love.update(dt)
-    -- Process download thread results
-    if state == "downloading" then
+    -- Drive FlexLove so mouse/touch polling, hover, and click synthesis run each frame.
+    -- Without this, processMouseEvents is never called and no button responds.
+    local ok, err = pcall(FlexLove.update, dt)
+    if not ok then log("UPDATE ERROR: " .. tostring(err)) end
+
+    -- Pump download thread results (progress / completion / failure).
+    if state ~= "playing" then
         process_download_results()
     end
 end
 
--- Touch events (primary input on mobile & desktop)
-function love.touchpressed(id, x, y)
-    if state == "menu" then
-        -- Check refresh button first
-        if ui.hit_refresh(x, y) then
-            fetch_list()
-            return
-        end
-        ui.touch_pressed(id, x, y)
-    elseif state == "error" then
-        fetch_list()
+function love.draw()
+    if state ~= "playing" then
+        local ok, err = pcall(function()
+            FlexLove.draw()
+            FlexLove.executeDeferredCallbacks()
+        end)
+        if not ok then log("DRAW ERROR: " .. tostring(err)) end
     end
+end
+
+function love.resize(w, h)
+    ui.resize(w, h)
+    FlexLove.resize()
+end
+
+-- Touch events (primary input on mobile)
+function love.touchpressed(id, x, y)
+    FlexLove.touchpressed(id, x, y)
 end
 
 function love.touchmoved(id, x, y)
-    if state == "menu" then
-        ui.touch_moved(id, x, y)
-    end
+    FlexLove.touchmoved(id, x, y)
 end
 
 function love.touchreleased(id, x, y)
-    if state == "menu" then
-        local action, game_id = ui.touch_released(id, x, y, games, installed)
-        handle_action(action, game_id)
-    end
+    FlexLove.touchreleased(id, x, y)
 end
 
--- Mouse events (for desktop testing, passthrough to touch)
-function love.mousepressed(x, y, button)
-    if button == 1 then
-        love.touchpressed("mouse", x, y)
-    end
-end
-
-function love.mousemoved(x, y)
-    if love.mouse.isDown(1) and state == "menu" then
-        ui.touch_moved("mouse", x, y)
-    end
-end
-
-function love.mousereleased(x, y, button)
-    if button == 1 then
-        love.touchreleased("mouse", x, y)
-    end
-end
 
 function love.wheelmoved(dx, dy)
-    if state == "menu" then
-        ui.wheel_moved(dx, dy)
-    end
+    FlexLove.wheelmoved(dx, dy)
 end
 
---------------------------------------------------------------------------------
--- Global error handler — LÖVE calls this on unhandled errors
---------------------------------------------------------------------------------
-function love.errhand(msg)
-    log("!!! FATAL ERROR: " .. tostring(msg))
-    -- Also write to a separate crash log that's easy to find
-    local f = io.open(love.filesystem.getSaveDirectory() .. "/crash.log", "w")
-    if f then
-        f:write("StoneGate crashed at " .. os.date() .. "\n")
-        f:write("Error: " .. tostring(msg) .. "\n")
-        f:close()
-    end
+function love.keypressed(key, scancode, isrepeat)
+    FlexLove.keypressed(key, scancode, isrepeat)
 end

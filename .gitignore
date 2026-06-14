@@ -10,3 +10,21 @@ tools/platform-tools.zip
 
 # 服务端生成的 .love 文件 (由 server.py 自动生成)
 server/games/*.love
+
+# === 调试/测试临时产物 (非源码) ===
+/*.png
+/*.txt
+__pycache__/
+test_flexlove/
+wrap_test/
+ui_test/
+test_wrap.lua
+screenshot_tool/bin/
+screenshot_tool/obj/
+
+# === 分发的游戏内容 (非 boot_shell 本体,按需另行管理) ===
+server/games/marble-duel/
+server/games/plinko/
+server/games/*.png
+server/games/*.txt
+server/games/*.log

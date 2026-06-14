@@ -24,7 +24,7 @@ APP_NAME="StoneGate"
 PACKAGE_NAME="com.stonegate.app"
 VERSION_CODE=2
 VERSION_NAME="2.0.0"
-SCREEN_ORIENTATION="sensorPortrait"
+SCREEN_ORIENTATION="fullSensor"
 
 # LÖVE embed APK 下载地址 (love-android 官方 release)
 LOVE_APK_URL="https://github.com/love2d/love-android/releases/download/11.5a/love-11.5-android-embed.apk"
@@ -195,6 +195,9 @@ if ! grep -q "android:versionCode" "$MANIFEST"; then
     sed -i "s|package=\"${PACKAGE_NAME}\"|package=\"${PACKAGE_NAME}\" android:versionCode=\"${VERSION_CODE}\" android:versionName=\"${VERSION_NAME}\"|" "$MANIFEST"
 fi
 
+# Make debuggable for log access via run-as (only if not already set)
+grep -q 'android:debuggable' "$MANIFEST" || sed -i 's|<application |<application android:debuggable="true" |' "$MANIFEST"
+
 sed -i \
     -e "s|renameManifestPackage:.*|renameManifestPackage: ${PACKAGE_NAME}|" \
     -e "s|versionCode:.*|versionCode: ${VERSION_CODE}|" \
@@ -214,7 +217,7 @@ GAME_LOVE="$BUILD_DIR/game.love"
 /c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -Command "
 Remove-Item -Force '$(cygpath -w "$GAME_LOVE")' -ErrorAction SilentlyContinue
 Set-Location '$(cygpath -w "$SRC_DIR")'
-Compress-Archive -Path *.lua -DestinationPath '$(cygpath -w "$BUILD_DIR/_temp.zip")' -Force
+Compress-Archive -Path *.lua, FlexLove -DestinationPath '$(cygpath -w "$BUILD_DIR/_temp.zip")' -Force
 Rename-Item '$(cygpath -w "$BUILD_DIR/_temp.zip")' 'game.love'
 " 2>&1 | tail -1
 
