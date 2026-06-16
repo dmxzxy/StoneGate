@@ -50,6 +50,7 @@ local err_msg  = ""
 local err_detail = ""        -- detailed error for crash logs
 local dl_game  = nil         -- game currently being downloaded
 local dl_progress = 0
+local dl_total = 0           -- total bytes (from Content-Length, 0 if unknown)
 
 -- Thumbnail image cache: { [game_id] = Image }
 local thumbnails = {}
@@ -184,7 +185,8 @@ local function start_download(game_id)
 
     dl_game = game
     dl_progress = 0
-    ui.update_download(dl_game, dl_progress)
+    dl_total = 0
+    ui.update_download(dl_game, dl_progress, dl_total)
     set_state("downloading")
 
     -- Ensure games directory exists
@@ -218,18 +220,30 @@ local function process_download_results()
         if not msg then break end
 
         if msg.action == "progress" and state == "downloading" then
-            -- Update progress 闂?we may not know total size, so show bytes
+            -- Update progress — show bytes, and a real % when total is known
             dl_progress = msg.downloaded
-            ui.update_download(dl_game, dl_progress)
+            if msg.total and msg.total > 0 then dl_total = msg.total end
+            ui.update_download(dl_game, dl_progress, dl_total)
         elseif msg.action == "done" then
             if msg.ok then
-                -- Download succeeded 闂?register in manifest
+                -- Download succeeded — verify integrity before registering, so a
+                -- truncated/corrupt file never gets marked installed.
                 local dest = config.download_dir .. "/" .. msg.game_id .. ".love"
-                updater.register_download(dl_game, dest)
-                installed = updater.scan_installed()
-                set_state("menu")
-                ui.rebuild_cards(games, installed, thumbnails)
-                log("Download complete: " .. msg.game_id .. " (" .. msg.size .. " bytes)")
+                local sha = dl_game and dl_game.sha256
+                if updater.verify_file(dest, sha) then
+                    updater.register_download(dl_game, dest)
+                    installed = updater.scan_installed()
+                    set_state("menu")
+                    ui.rebuild_cards(games, installed, thumbnails)
+                    log("Download complete: " .. msg.game_id .. " (" .. msg.size .. " bytes)")
+                else
+                    love.filesystem.remove(dest)
+                    err_msg = "File verification failed"
+                    err_detail = "Downloaded file is corrupt or incomplete (checksum mismatch). Please retry."
+                    ui.update_error(err_msg, err_detail)
+                    set_state("error")
+                    log("VERIFY FAILED: " .. msg.game_id .. " expected sha=" .. tostring(sha))
+                end
             else
                 -- Download failed
                 err_msg = "Download failed: " .. (msg.err or "unknown")
@@ -334,6 +348,7 @@ function love.draw()
         local ok, err = pcall(function()
             FlexLove.draw()
             FlexLove.executeDeferredCallbacks()
+            ui.draw_fade()  -- screen-transition fade, drawn above the FlexLove tree
         end)
         if not ok then log("DRAW ERROR: " .. tostring(err)) end
     end

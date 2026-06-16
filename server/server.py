@@ -10,6 +10,7 @@ Just drop .love files in the games/ directory and they'll appear in the list.
 Or use the upload API: POST /games/upload with multipart/form-data.
 """
 
+import hashlib
 import http.server
 import json
 import os
@@ -103,28 +104,66 @@ AUTH_TOKEN = os.environ.get("STONEGATE_TOKEN", "stonegate2024")
 
 
 def parse_love_metadata(love_path: Path) -> dict:
-    """Extract title and version from conf.lua inside a .love file."""
+    """Extract metadata from a .love (zip) file.
+
+    Preferred source is a meta.json bundled in the game's root (shipped by the
+    game author alongside conf.lua/main.lua). If absent, we fall back to the
+    game title parsed out of conf.lua and a default version — so old .love files
+    with no meta.json keep working unchanged.
+    """
     meta = {
         "name": love_path.stem.replace("_", " ").title(),
         "version": "1.0",
+        "author": "",
+        "description": "",
     }
     try:
         with zipfile.ZipFile(love_path) as zf:
-            for name in zf.namelist():
+            names = zf.namelist()
+
+            # 1) meta.json — the authoritative source when present.
+            #    Accept it at the archive root ("meta.json") or one level deep
+            #    (some packers wrap everything in a top folder).
+            meta_name = None
+            for name in names:
+                base = name.rsplit("/", 1)[-1]
+                depth = name.strip("/").count("/")
+                if base == "meta.json" and depth <= 1:
+                    meta_name = name
+                    break
+            if meta_name:
+                try:
+                    data = json.loads(zf.read(meta_name).decode("utf-8"))
+                    for key in ("name", "version", "author", "description"):
+                        if data.get(key):
+                            meta[key] = str(data[key])
+                    return meta
+                except Exception:
+                    pass  # malformed meta.json — fall through to conf.lua
+
+            # 2) Fallback: pull a window title out of conf.lua.
+            for name in names:
                 if name.endswith("conf.lua"):
                     conf = zf.read(name).decode("utf-8", errors="ignore")
                     for line in conf.splitlines():
                         line = line.strip()
-                        # t.title = "My Game"
+                        # t.window.title = "My Game"  /  t.title = "My Game"
                         if "title" in line and "=" in line and "t.version" not in line:
                             val = line.split("=", 1)[1].strip().strip(",").strip('"').strip("'")
                             if val and not val.startswith("t"):
                                 meta["name"] = val
-                        # t.version = "1.2"  (game version, not LÖVE version)
-                        # We look for a comment or a known field
     except Exception:
         pass
     return meta
+
+
+def sha256_of(path: Path) -> str:
+    """Stream-hash a file, returning the lowercase hex digest."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def generate_game_list() -> list:
@@ -140,13 +179,16 @@ def generate_game_list() -> list:
         thumb = f"/games/{game_id}.png"
 
         games.append({
-            "id":        game_id,
-            "name":      meta["name"],
-            "version":   meta["version"],
-            "file":      f"/games/{love_file.name}",
-            "size":      stat.st_size,
-            "thumbnail": thumb if (GAMES_DIR / f"{game_id}.png").exists() else None,
-            "updated":   datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d"),
+            "id":          game_id,
+            "name":        meta["name"],
+            "version":     meta["version"],
+            "author":      meta["author"],
+            "description": meta["description"],
+            "file":        f"/games/{love_file.name}",
+            "size":        stat.st_size,
+            "sha256":      sha256_of(love_file),
+            "thumbnail":   thumb if (GAMES_DIR / f"{game_id}.png").exists() else None,
+            "updated":     datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d"),
         })
 
     return games
@@ -248,6 +290,13 @@ class GameHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         filename = file_item.get_filename()
+        # Strip any path components — a malicious client could send
+        # "../../x.love" to escape games/. basename + an explicit ".." reject
+        # keeps every upload inside GAMES_DIR.
+        filename = os.path.basename(filename.replace("\\", "/"))
+        if not filename or filename.startswith("..") or "/" in filename:
+            _json_response(self, 400, {"error": "Invalid filename"})
+            return
         if not filename.endswith(".love"):
             _json_response(self, 400, {"error": "File must have .love extension"})
             return
@@ -264,7 +313,7 @@ class GameHandler(http.server.SimpleHTTPRequestHandler):
 
         try:
             with open(dest, "wb") as f:
-                f.write(file_item.file.read())
+                f.write(file_item.data)
 
             file_size = dest.stat().st_size
             game_id = dest.stem
@@ -278,8 +327,11 @@ class GameHandler(http.server.SimpleHTTPRequestHandler):
                     "id": game_id,
                     "name": meta["name"],
                     "version": meta["version"],
+                    "author": meta["author"],
+                    "description": meta["description"],
                     "file": f"/games/{filename}",
                     "size": file_size,
+                    "sha256": sha256_of(dest),
                 },
             })
 
@@ -330,66 +382,32 @@ class GameHandler(http.server.SimpleHTTPRequestHandler):
 
 
 def build_sample_game():
-    """Create a sample .love file if none exist."""
+    """Package the bundled sample/ template into sample.love.
+
+    sample/ is a checked-in template project (conf.lua + main.lua + meta.json +
+    assets/) that shows how to write a game for StoneGate. We zip the whole
+    directory tree so the produced sample.love carries its meta.json and assets,
+    making it a live, end-to-end example of the publish flow.
+    """
     sample_dir = GAMES_DIR / "sample"
     sample_love = GAMES_DIR / "sample.love"
 
-    if sample_love.exists():
+    if not sample_dir.is_dir():
+        return  # no template source — nothing to package
+
+    # Rebuild if the .love is missing or any source file is newer than it.
+    src_files = [p for p in sample_dir.rglob("*") if p.is_file()]
+    if not src_files:
         return
+    if sample_love.exists():
+        newest = max(p.stat().st_mtime for p in src_files)
+        if sample_love.stat().st_mtime >= newest:
+            return
 
-    sample_dir.mkdir(parents=True, exist_ok=True)
-    main_lua = sample_dir / "main.lua"
-    if not main_lua.exists():
-        main_lua.write_text('''-- conf.lua embedded
-	local x, y = 200, 300
-	local vx, vy = 180, 130
-	local r, g, b = 0.3, 0.6, 1.0
-
-	function love.load()
-	    love.window.setTitle("Sample Game")
-	end
-
-	function love.update(dt)
-	    local w, h = love.graphics.getDimensions()
-	    x = x + vx * dt
-	    y = y + vy * dt
-	    if x <= 30 or x >= w - 30 then
-	        vx = -vx
-	        r, g, b = math.random()*0.8+0.2, math.random()*0.8+0.2, math.random()*0.8+0.2
-	    end
-	    if y <= 30 or y >= h - 30 then
-	        vy = -vy
-	        r, g, b = math.random()*0.8+0.2, math.random()*0.8+0.2, math.random()*0.8+0.2
-	    end
-	    x = math.max(30, math.min(w - 30, x))
-	    y = math.max(30, math.min(h - 30, y))
-	end
-
-	function love.draw()
-	    love.graphics.setBackgroundColor(0.08, 0.10, 0.15)
-
-	    -- Trail effect
-	    love.graphics.setColor(0.15, 0.20, 0.30, 0.4)
-	    love.graphics.circle("fill", x - vx * 0.02, y - vy * 0.02, 28)
-
-	    -- Ball
-	    love.graphics.setColor(r, g, b)
-	    love.graphics.circle("fill", x, y, 30)
-
-	    -- Highlight
-	    love.graphics.setColor(1, 1, 1, 0.3)
-	    love.graphics.circle("fill", x - 8, y - 8, 10)
-
-	    -- Instructions
-	    love.graphics.setColor(0.6, 0.6, 0.7)
-	    love.graphics.printf("Sample Game - Bouncing Ball\\nPress ESC to return to StoneGate", 20, 20, love.graphics.getWidth() - 40)
-	end
-''')
-
-    # Package into .love (just a zip)
     with zipfile.ZipFile(sample_love, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.write(main_lua, "main.lua")
-    print(f"[stonegate] Created sample game: {sample_love}")
+        for p in src_files:
+            zf.write(p, p.relative_to(sample_dir).as_posix())
+    print(f"[stonegate] Packaged sample game: {sample_love} ({len(src_files)} files)")
 
 
 def main():

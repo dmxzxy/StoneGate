@@ -1,0 +1,6 @@
+{
+  "name": "Sample",
+  "version": "1.0.0",
+  "author": "StoneGate",
+  "description": "StoneGate 游戏模板:演示资源加载、触摸输入与退出回大厅。复制本目录即可开新游戏。"
+}

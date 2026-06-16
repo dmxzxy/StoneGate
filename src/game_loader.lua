@@ -71,6 +71,19 @@ local function log(msg)
     if f then f:write("[" .. os.date("%H:%M:%S") .. "] [loader] " .. msg .. "\n") f:close() end
 end
 
+--- Reset global LÖVE graphics/audio state before handing control back to the
+--- shell. A game can leave color, scissor, transform, shader, canvas, blend
+--- mode, or line width mutated; without this those leak into the shell's draw
+--- and corrupt the menu. love.graphics.reset() also clears the active font,
+--- so we restore the shell's default font afterwards (matches main.lua).
+local function reset_graphics_state()
+    love.graphics.reset()              -- color/lineWidth/shader/canvas/blend/font/scissor all reset
+    love.graphics.setScissor()         -- belt-and-suspenders; reset() covers this
+    if love.graphics.origin then love.graphics.origin() end
+    if love.audio and love.audio.stop then pcall(love.audio.stop) end
+    love.graphics.setFont(love.graphics.newFont(17))  -- shell default, see main.lua
+end
+
 --------------------------------------------------------------------------------
 -- Public API
 --------------------------------------------------------------------------------
@@ -270,6 +283,11 @@ function game_loader.exit()
     -- Unmount the .love file
     love.filesystem.unmount(mounted.path)
     mounted = nil
+
+    -- Scrub graphics/audio state the game may have left dirty, then reclaim the
+    -- game's images/sounds/canvases so repeated play sessions don't leak memory.
+    reset_graphics_state()
+    collectgarbage("collect")
 
     -- Restore shell callbacks
     restore_shell_callbacks()

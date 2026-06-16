@@ -53,6 +53,7 @@ while true do
         else
             local downloaded = 0
             local last_report = 0
+            local total = 0   -- learned from Content-Length once headers arrive
 
             local function sink(chunk)
                 if chunk then
@@ -63,6 +64,7 @@ while true do
                         result_channel:push({
                             action     = "progress",
                             downloaded = downloaded,
+                            total      = total,
                             game_id    = game_id,
                         })
                         last_report = downloaded
@@ -71,7 +73,7 @@ while true do
                 return true
             end
 
-            local ok, one, two = pcall(function()
+            local ok, one, two, headers = pcall(function()
                 return socket_http.request({
                     url    = url,
                     method = "GET",
@@ -80,6 +82,12 @@ while true do
             end)
 
             file:close()
+
+            -- LuaSocket lowercases header keys; Content-Length lets the UI show
+            -- a real percentage instead of an indeterminate spinner.
+            if type(headers) == "table" and headers["content-length"] then
+                total = tonumber(headers["content-length"]) or 0
+            end
 
             if not ok then
                 result_channel:push({
@@ -94,6 +102,7 @@ while true do
                         action  = "done",
                         ok      = true,
                         size    = downloaded,
+                        total   = total,
                         game_id = game_id,
                     })
                 else

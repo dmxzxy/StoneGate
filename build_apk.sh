@@ -217,7 +217,7 @@ GAME_LOVE="$BUILD_DIR/game.love"
 /c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -Command "
 Remove-Item -Force '$(cygpath -w "$GAME_LOVE")' -ErrorAction SilentlyContinue
 Set-Location '$(cygpath -w "$SRC_DIR")'
-Compress-Archive -Path *.lua, FlexLove -DestinationPath '$(cygpath -w "$BUILD_DIR/_temp.zip")' -Force
+Compress-Archive -Path *.lua, FlexLove, assets -DestinationPath '$(cygpath -w "$BUILD_DIR/_temp.zip")' -Force
 Rename-Item '$(cygpath -w "$BUILD_DIR/_temp.zip")' 'game.love'
 " 2>&1 | tail -1
 

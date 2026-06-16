@@ -150,6 +150,19 @@ function updater.download_thumbnail(thumbnail_url, dest_path)
     return ok
 end
 
+--- Verify a downloaded file against the server-provided SHA256.
+--- A corrupt or truncated .love (e.g. a download cut short) would otherwise be
+--- registered as "installed" and crash on launch — this catches it first.
+--- Returns true if it matches, OR if expected_sha is nil/empty (nothing to
+--- check against, e.g. the offline fallback list carries no hashes).
+function updater.verify_file(rel_path, expected_sha)
+    if not expected_sha or expected_sha == "" then return true end
+    local data = love.filesystem.read(rel_path)
+    if not data then return false end
+    local digest = love.data.encode("string", "hex", love.data.hash("sha256", data))
+    return digest:lower() == expected_sha:lower()
+end
+
 --- Remove a downloaded game.
 function updater.remove_game(game_id)
     local manifest = load_manifest()
