@@ -1,0 +1,713 @@
+-- ============================================================================
+-- QUIVER — 挂机弓箭手（WoW 式装备栏 + 箭矢消耗经济 + 地区/升级）
+-- 纯 LÖVE2D，无依赖，无资源。
+--
+-- 两条战力腿：
+--   · 装备(永久)：WoW 式多格装备栏 → 主属性(力/敏/耐) → 攻击/攻速/HP/暴击
+--   · 箭矢(流动)：用原材料制作分档箭，战斗消耗；高级箭打光自动降级 → 催你补料
+-- 战斗是按攻速驱动的回合制对决(ATB)，一个个有分量的敌人，带入场/死亡过程。
+--
+-- ★ 数值锚点（一切由此推导，自洽不膨胀）：
+--   1 STR=+1攻击 ; 1 AGI=+0.6%攻速+0.04%暴击 ; 1 STA=+6生命
+--   装备预算 budget = GEAR_BUDGET * ilvl * rarity.mult * slot.weight
+--   箭矢伤害 = 攻击 × 箭档倍率（打光降级，无箭则 0.5）
+--   角色每级 +2力 +2敏 +3耐（慢），经验需求 80*L^1.6
+--
+-- 之后(roadmap)：挂机砍树/挖矿/制造 作为材料来源；副本掉紫橙。
+-- ============================================================================
+
+local DESIGN_W, DESIGN_H = 480, 800
+local sw, sh = 1, 1
+local font, font_sm, font_med, font_big
+local t_accum, shake = 0, 0
+local ENTER_TIME, DEATH_TIME = 0.6, 0.6
+local ENEMY_HOME_X = DESIGN_W * 0.72
+local GEAR_BUDGET = 4
+local CRIT_MULT = 2.0
+local ARMOR_K = 160
+
+-- ============================================================================
+-- 数据
+-- ============================================================================
+local RARITIES = {
+    { id="uncommon",  name="Uncommon",  mult=1.0, affixes=1, color={0.4,0.85,0.4},  src="field"   },
+    { id="rare",      name="Rare",      mult=1.6, affixes=2, color={0.35,0.6,1.0},  src="field"   },
+    { id="epic",      name="Epic",      mult=2.6, affixes=3, color={0.75,0.4,1.0},  src="dungeon" },
+    { id="legendary", name="Legendary", mult=4.0, affixes=4, color={1.0,0.62,0.15}, src="dungeon" },
+}
+local RAR = {}; for i,r in ipairs(RARITIES) do RAR[r.id]=r; r.tier=i end
+
+-- WoW 式装备栏：左列防具，右列武器/首饰。kind 决定主属性，w 是该槽预算权重。
+local SLOTS = { "head","shoulder","chest","hands","legs","feet","neck","ring","trinket","bow","quiver" }
+local SLOT_INFO = {
+    head     = { name="Head",     kind="armor",   w=0.9,  col="L" },
+    shoulder = { name="Shoulder", kind="armor",   w=0.75, col="L" },
+    chest    = { name="Chest",    kind="armor",   w=1.0,  col="L" },
+    hands    = { name="Hands",    kind="armor",   w=0.75, col="L" },
+    legs     = { name="Legs",     kind="armor",   w=1.0,  col="L" },
+    feet     = { name="Feet",     kind="armor",   w=0.75, col="L" },
+    neck     = { name="Neck",     kind="jewelry", w=0.56, col="R" },
+    ring     = { name="Ring",     kind="jewelry", w=0.56, col="R" },
+    trinket  = { name="Trinket",  kind="jewelry", w=0.7,  col="R" },
+    bow      = { name="Bow",      kind="weapon",  w=2.0,  col="R" },
+    quiver   = { name="Quiver",   kind="quiver",  w=0.7,  col="R" },
+}
+local SLOTS_L = { "head","shoulder","chest","hands","legs","feet" }
+local SLOTS_R = { "neck","ring","trinket","bow","quiver" }
+local TIER_PREFIX = { "Worn", "Iron", "Steel", "Rune", "Dragon" }
+
+local ATTRS = { "str","agi","sta" }
+local ATTR_NAME = { str="STR", agi="AGI", sta="STA" }
+local ATTR_COLOR = { str={0.9,0.4,0.35}, agi={0.5,0.85,0.55}, sta={0.6,0.7,0.95} }
+
+local AFFIXES = {
+    { key="str", name="+%d STR" }, { key="agi", name="+%d AGI" },
+    { key="sta", name="+%d STA" }, { key="crit", name="+%d%% Crit", pct=true },
+}
+
+-- 原材料
+local MATERIALS = { "wood","iron","sinew","dust" }
+local MAT_NAME = { wood="Wood", iron="Iron", sinew="Sinew", dust="Dust" }
+local MAT_COLOR = { wood={0.6,0.42,0.22}, iron={0.72,0.74,0.8}, sinew={0.85,0.8,0.6}, dust={0.7,0.45,1.0} }
+
+-- 箭矢分档（低→高）。mult 乘在攻击上；cost 是制作 BATCH 支的材料。
+local ARROW_BATCH = 20
+local ARROW_TIERS = {
+    { id="wood",  name="Wood Arrow",  mult=1.0, color={0.6,0.45,0.25}, cost={ wood=3 } },
+    { id="iron",  name="Iron Arrow",  mult=1.3, color={0.7,0.72,0.78}, cost={ wood=1, iron=3 } },
+    { id="steel", name="Steel Arrow", mult=1.7, color={0.85,0.86,0.92},cost={ iron=4, sinew=2 } },
+    { id="rune",  name="Rune Arrow",  mult=2.2, color={0.75,0.45,1.0}, cost={ iron=3, sinew=2, dust=3 } },
+}
+
+local REGIONS = {
+    { id="meadow", name="Green Meadow", level=1,  ilvl=3,  rar={"uncommon","uncommon","rare"}, enemies={"boar","wolf"},          mats={"wood","wood","iron"} },
+    { id="forest", name="Dark Forest",  level=6,  ilvl=10, rar={"uncommon","rare","rare"},     enemies={"wolf","bandit","ogre"}, mats={"wood","iron","sinew"} },
+    { id="ruins",  name="Sunken Ruins", level=14, ilvl=20, rar={"rare","rare","epic"},         enemies={"bandit","ogre","wraith"},mats={"iron","sinew","dust"} },
+    { id="peak",   name="Frost Peak",   level=24, ilvl=32, rar={"rare","epic","epic"},         enemies={"ogre","wraith","golem"}, mats={"sinew","dust","dust"} },
+}
+local ENEMY_ARCH = {
+    boar  ={ name="Boar",        hp=1.0, dmg=1.0, armor=0.3, spd=0.55, color={0.6,0.45,0.35} },
+    wolf  ={ name="Wolf",        hp=0.8, dmg=1.2, armor=0.2, spd=0.85, color={0.5,0.5,0.55} },
+    bandit={ name="Bandit",      hp=1.1, dmg=1.1, armor=0.5, spd=0.6,  color={0.7,0.5,0.3} },
+    ogre  ={ name="Ogre",        hp=1.8, dmg=1.5, armor=0.6, spd=0.4,  color={0.45,0.6,0.3} },
+    wraith={ name="Wraith",      hp=1.2, dmg=1.6, armor=0.3, spd=0.7,  color={0.55,0.45,0.75} },
+    golem ={ name="Stone Golem", hp=2.6, dmg=1.4, armor=1.2, spd=0.35, color={0.6,0.62,0.68} },
+}
+
+local UI = {
+    bg={0.07,0.08,0.12}, panel={0.12,0.13,0.19,0.97}, line={0.26,0.28,0.36},
+    text={0.93,0.94,0.97}, dim={0.55,0.57,0.64}, good={0.4,0.85,0.5}, bad={0.88,0.3,0.3},
+    gold={1.0,0.84,0.25}, xp={0.45,0.6,1.0}, btn={0.25,0.55,1.0},
+}
+
+-- ============================================================================
+-- 状态
+-- ============================================================================
+local player, enemy, stage, region
+local floats, particles, projectile
+local screen = "combat"     -- combat | regions | gear | craft
+local result_banner, toast
+
+local function sx(v) return v*sw end
+local function sy(v) return v*sh end
+
+-- ============================================================================
+-- 装备
+-- ============================================================================
+local function roll_gear(slot, ilvl, rarity_id)
+    local info = SLOT_INFO[slot]; local r = RAR[rarity_id]
+    local budget = GEAR_BUDGET * ilvl * r.mult * info.w
+    local g = { slot=slot, ilvl=ilvl, rarity=rarity_id, stats={}, affixes={} }
+    if info.kind == "weapon" then
+        g.stats.weapon_attack = math.max(1, math.floor(budget))
+    elseif info.kind == "quiver" then
+        g.stats.agi = math.max(1, math.floor(budget))
+    elseif info.kind == "armor" then
+        g.stats.sta = math.max(1, math.floor(budget*0.7))
+        g.stats.armor = math.max(1, math.floor(budget*0.6))
+    else -- jewelry：随机一条主属性
+        local a = ATTRS[math.random(#ATTRS)]
+        g.stats[a] = math.max(1, math.floor(budget))
+    end
+    g.name = TIER_PREFIX[math.min(#TIER_PREFIX, 1+math.floor(ilvl/8))] .. " " .. info.name
+    local pool = {}; for _,a in ipairs(AFFIXES) do pool[#pool+1]=a end
+    for _=1, r.affixes do
+        if #pool==0 then break end
+        local a = table.remove(pool, math.random(#pool))
+        local val = a.pct and math.max(1,math.floor(budget*0.012)) or math.max(1,math.floor(budget*0.3))
+        g.affixes[#g.affixes+1] = { key=a.key, val=val, pct=a.pct }
+    end
+    return g
+end
+
+local function add_gear_stats(g, acc)
+    for k,v in pairs(g.stats) do acc[k]=(acc[k] or 0)+v end
+    for _,af in ipairs(g.affixes) do
+        if af.key=="crit" then acc.crit_pct=(acc.crit_pct or 0)+af.val
+        else acc[af.key]=(acc[af.key] or 0)+af.val end
+    end
+end
+local function gear_score(g)
+    local a={}; add_gear_stats(g,a)
+    return (a.weapon_attack or 0)*2 +(a.str or 0)+(a.agi or 0)+(a.sta or 0)*0.8+(a.armor or 0)*0.5+(a.crit_pct or 0)*4
+end
+local function gear_color(g) return RAR[g.rarity].color end
+local function gear_full_name(g) return RAR[g.rarity].name.." "..g.name end
+
+-- ============================================================================
+-- 角色属性聚合（锚点换算）
+-- ============================================================================
+local function recalc()
+    local a = { str=player.base_str, agi=player.base_agi, sta=player.base_sta }
+    for _,slot in ipairs(SLOTS) do local g=player.equip[slot]; if g then add_gear_stats(g,a) end end
+    local wa = a.weapon_attack or 0
+    player.str=a.str; player.agi=a.agi; player.sta=a.sta; player.armor=a.armor or 0
+    player.attack    = 5 + wa + player.str
+    player.atk_speed = 0.55 * (1 + player.agi*0.006)
+    player.crit      = math.min(0.6, 0.05 + player.agi*0.0004 + (a.crit_pct or 0)*0.01)
+    player.max_hp    = 60 + player.sta*6
+    if player.hp==nil or player.hp>player.max_hp then player.hp=player.max_hp end
+    -- 当前箭档倍率（用于 DPS 估算与显示）
+    player.arrow_mult, player.arrow_tier = 0.5, nil
+    for i=#ARROW_TIERS,1,-1 do if (player.arrows[ARROW_TIERS[i].id] or 0)>0 then player.arrow_mult=ARROW_TIERS[i].mult; player.arrow_tier=ARROW_TIERS[i]; break end end
+    local cf = 1 + player.crit*(CRIT_MULT-1)
+    player.dps = player.attack * player.arrow_mult * cf * player.atk_speed
+end
+
+-- ============================================================================
+-- 升级
+-- ============================================================================
+local function xp_need(lv) return math.floor(80*(lv^1.6)) end
+local function gain_xp(amount)
+    player.xp = player.xp + amount
+    while player.xp >= player.xp_next do
+        player.xp = player.xp - player.xp_next
+        player.level = player.level + 1
+        player.base_str = player.base_str + 2
+        player.base_agi = player.base_agi + 2
+        player.base_sta = player.base_sta + 3
+        player.xp_next = xp_need(player.level); recalc(); player.hp = player.max_hp
+        floats[#floats+1]={ x=DESIGN_W*0.18, y=DESIGN_H*0.14, text="LEVEL "..player.level, color=UI.xp, timer=1.4, scale=1.4, vy=-50 }
+    end
+end
+
+-- ============================================================================
+-- 箭矢制作
+-- ============================================================================
+local function can_craft(tier)
+    for m,n in pairs(tier.cost) do if (player.mats[m] or 0) < n then return false end end
+    return true
+end
+local function craft(tier)
+    if not can_craft(tier) then return end
+    for m,n in pairs(tier.cost) do player.mats[m] = player.mats[m] - n end
+    player.arrows[tier.id] = (player.arrows[tier.id] or 0) + ARROW_BATCH
+    recalc()
+end
+
+-- ============================================================================
+-- 挂机产线：砍树→木, 挖矿→铁/尘, 制造→自动 fletch。战斗→兽筋(在 drop_loot)。
+-- 几条线同跑、产出汇入同一材料池；线之间的配比 = 你想要的「工厂」感。
+-- ============================================================================
+local WOOD_RATE, IRON_RATE, DUST_RATE = 0.7, 0.45, 0.07   -- 每秒每级
+local FLETCH_RATE = 0.2                                     -- 每秒每级的「制作动作」数
+local function line_cost(lvl) return math.floor(15 * (lvl ^ 1.7) + 10) end
+local function upgrade_line(key)
+    local c = line_cost(player.lines[key])
+    if player.gold >= c then player.gold = player.gold - c; player.lines[key] = player.lines[key] + 1 end
+end
+
+local function production_tick(dt)
+    local L = player.lines; local acc = player.acc
+    acc.wood = acc.wood + WOOD_RATE * L.wood * dt
+    acc.iron = acc.iron + IRON_RATE * L.iron * dt
+    acc.dust = acc.dust + DUST_RATE * L.iron * dt
+    local function flush(k, m) while acc[k] >= 1 do player.mats[m] = (player.mats[m] or 0) + 1; acc[k] = acc[k] - 1 end end
+    flush("wood","wood"); flush("iron","iron"); flush("dust","dust")
+    -- 自动制造：每个制作动作，造一批当前能负担的最高档箭
+    if player.fletch_auto then
+        acc.fletch = acc.fletch + FLETCH_RATE * L.fletch * dt
+        while acc.fletch >= 1 do
+            acc.fletch = acc.fletch - 1
+            local made = false
+            for i = #ARROW_TIERS, 1, -1 do if can_craft(ARROW_TIERS[i]) then craft(ARROW_TIERS[i]); made = true; break end end
+            if not made then acc.fletch = 0; break end   -- 材料不够，别空转
+        end
+    end
+end
+
+-- ============================================================================
+-- 战斗
+-- ============================================================================
+local function mitigation(armor) return armor/(armor+ARMOR_K) end
+
+local function make_enemy(arch_id)
+    local arch=ENEMY_ARCH[arch_id]; local lvl=region.level
+    local scale = 1 + (lvl-1)*0.22 + (stage%5)*0.04
+    local hp = math.floor(60*arch.hp*scale)
+    return { arch_id=arch_id, name=arch.name, color=arch.color, level=lvl,
+        max_hp=hp, hp=hp, attack=math.floor(8*arch.dmg*scale), armor=math.floor(20*arch.armor*scale),
+        spd=arch.spd, atb=0, flash=0, hurt=0, phase="enter", phase_t=0, x=DESIGN_W+60 }
+end
+local function next_enemy() stage=stage+1; local p=region.enemies; enemy=make_enemy(p[math.random(#p)]) end
+local function add_float(x,y,txt,col,scale) floats[#floats+1]={x=x,y=y,text=txt,color=col or UI.text,timer=1.0,scale=scale or 1,vy=-45} end
+local function burst(x,y,c,n) for _=1,n do local a=math.random()*math.pi*2; local s=40+math.random()*150; particles[#particles+1]={x=x,y=y,vx=math.cos(a)*s,vy=math.sin(a)*s-40,life=0.4+math.random()*0.4,max=0.8,size=2+math.random()*4,color=c} end end
+local function set_toast(t,c) toast={text=t,color=c or UI.text,timer=2.5} end
+
+local function drop_loot()
+    gain_xp(math.floor(enemy.level*6+10))
+    player.gold = player.gold + math.floor(enemy.level*2+math.random(1,4))
+    -- 战斗只产兽筋(sinew)；木/铁/尘由挂机产线产出 → 高级箭需要两边都跟上
+    local amt = 1 + math.floor(region.level/4)
+    player.mats.sinew = (player.mats.sinew or 0) + amt
+    add_float(enemy.x, DESIGN_H*0.2, "+"..amt.." Sinew", MAT_COLOR.sinew)
+    if math.random() < 0.3 then
+        local rid = region.rar[math.random(#region.rar)]
+        local g = roll_gear(SLOTS[math.random(#SLOTS)], region.ilvl, rid)
+        local cur = player.equip[g.slot]
+        if not cur or gear_score(g) > gear_score(cur) then
+            if cur then player.bag[#player.bag+1]=cur end
+            player.equip[g.slot]=g; recalc(); set_toast("Equipped "..gear_full_name(g), gear_color(g))
+        elseif #player.bag<24 then player.bag[#player.bag+1]=g end
+    end
+end
+
+local function archer_fire()
+    -- 取最高可用箭档，消耗 1 支；无箭则简易箭(0.5x)
+    local mult, tier = 0.5, nil
+    for i=#ARROW_TIERS,1,-1 do local id=ARROW_TIERS[i].id; if (player.arrows[id] or 0)>0 then mult=ARROW_TIERS[i].mult; tier=ARROW_TIERS[i]; player.arrows[id]=player.arrows[id]-1; break end end
+    if tier==nil then recalc() end  -- 刚打光，刷新显示
+    local crit = math.random()<player.crit
+    local raw = player.attack*mult*(crit and CRIT_MULT or 1)
+    local dmg = math.max(1, raw*(1-mitigation(enemy.armor)))
+    projectile = { x=DESIGN_W*0.18, tx=ENEMY_HOME_X, y=DESIGN_H*0.2, dmg=dmg, crit=crit, color=tier and tier.color or {0.7,0.7,0.7}, t=0 }
+end
+local function resolve_hit(p)
+    enemy.hp=enemy.hp-p.dmg; enemy.flash=0.1; enemy.hurt=0.2
+    add_float(enemy.x, DESIGN_H*0.13, math.floor(p.dmg)..(p.crit and "!" or ""), p.crit and UI.gold or {1,1,1}, p.crit and 1.4 or 1)
+    shake=math.min(12,shake+(p.crit and 5 or 2))
+    if enemy.hp<=0 then enemy.hp=0; enemy.phase="dying"; enemy.phase_t=0; burst(enemy.x,DESIGN_H*0.2,enemy.color,16); add_float(enemy.x,DESIGN_H*0.12,"DEFEATED",UI.gold,1.2); shake=math.min(14,shake+6); drop_loot() end
+end
+local function enemy_attack()
+    local dmg=math.max(1, enemy.attack*(1-mitigation(player.armor)))
+    player.hp=player.hp-dmg; add_float(DESIGN_W*0.18,DESIGN_H*0.16,"-"..math.floor(dmg),UI.bad); shake=math.min(14,shake+5)
+    if player.hp<=0 then player.hp=0; result_banner="defeat" end
+end
+
+local function update(dt)
+    t_accum=t_accum+dt; shake=math.max(0,shake-dt*40)
+    for i=#particles,1,-1 do local p=particles[i]; p.vy=p.vy+260*dt; p.x=p.x+p.vx*dt; p.y=p.y+p.vy*dt; p.life=p.life-dt; if p.life<=0 then table.remove(particles,i) end end
+    for i=#floats,1,-1 do local f=floats[i]; f.y=f.y+f.vy*dt; f.vy=f.vy+40*dt; f.timer=f.timer-dt; if f.timer<=0 then table.remove(floats,i) end end
+    if toast then toast.timer=toast.timer-dt; if toast.timer<=0 then toast=nil end end
+    -- 挂机产线始终运转（真·挂机：开着菜单也在产）
+    production_tick(dt)
+    recalc()  -- 让箭档显示随库存实时刷新
+    if result_banner then return end
+    -- 战斗也始终运转（不再受当前界面限制）
+    if projectile then
+        projectile.x=projectile.x+(projectile.tx-projectile.x)*math.min(1,dt*18); projectile.t=projectile.t+dt*6
+        if projectile.t>=1 or math.abs(projectile.x-projectile.tx)<sx(8) then resolve_hit(projectile); projectile=nil end
+        return
+    end
+    if not enemy then return end
+    enemy.flash=math.max(0,enemy.flash-dt); enemy.hurt=math.max(0,enemy.hurt-dt)
+    if enemy.phase=="enter" then
+        enemy.phase_t=enemy.phase_t+dt; local k=math.min(1,enemy.phase_t/ENTER_TIME); local e=1-(1-k)*(1-k)
+        enemy.x=DESIGN_W+60+(ENEMY_HOME_X-(DESIGN_W+60))*e; if k>=1 then enemy.phase="fight"; enemy.x=ENEMY_HOME_X end
+        return
+    end
+    if enemy.phase=="dying" then enemy.phase_t=enemy.phase_t+dt; if enemy.phase_t>=DEATH_TIME then next_enemy() end; return end
+    player.atb=player.atb+player.atk_speed*dt; enemy.atb=enemy.atb+enemy.spd*dt
+    if player.atb>=1 then player.atb=0; archer_fire() elseif enemy.atb>=1 then enemy.atb=0; enemy_attack() end
+end
+
+-- ============================================================================
+-- 初始化
+-- ============================================================================
+local function init()
+    player = { level=1, xp=0, xp_next=xp_need(1), base_str=5, base_agi=5, base_sta=5,
+        gold=0, hp=nil, equip={}, bag={}, atb=0,
+        mats={ wood=10, iron=5, sinew=0, dust=0 }, arrows={ wood=30 },
+        lines={ wood=1, iron=1, fletch=1 }, acc={ wood=0, iron=0, dust=0, fletch=0 }, fletch_auto=true }
+    player.equip.bow = roll_gear("bow", 1, "uncommon")
+    recalc(); player.hp=player.max_hp
+    region=REGIONS[1]; stage=0; floats={}; particles={}; projectile=nil; result_banner=nil; toast=nil
+    next_enemy()
+end
+
+-- ============================================================================
+-- 绘制工具
+-- ============================================================================
+local function setc(c,a) love.graphics.setColor(c[1],c[2],c[3],a or c[4] or 1) end
+local function rrect(m,x,y,w,h,r) love.graphics.rectangle(m,x,y,w,h,r or 6*sw,r or 6*sw) end
+local function panel(x,y,w,h,fill,border,r)
+    setc(fill or UI.panel); rrect("fill",x,y,w,h,r or 8*sw)
+    love.graphics.setColor(1,1,1,0.04); rrect("fill",x,y,w,h*0.42,r or 8*sw)
+    if border then setc(border); love.graphics.setLineWidth(math.max(1,1.3*sw)); rrect("line",x,y,w,h,r or 8*sw); love.graphics.setLineWidth(1) end
+end
+local function button(x,y,w,h,label,col,enabled,fnt)
+    col=col or UI.btn; if enabled==false then col={col[1]*0.35,col[2]*0.35,col[3]*0.4} end
+    setc(col); rrect("fill",x,y,w,h,6*sw); love.graphics.setColor(1,1,1,0.16); rrect("fill",x+6*sw,y+1.5*sh,w-12*sw,h*0.34)
+    love.graphics.setColor(0,0,0,0.22); rrect("fill",x,y+h-3*sh,w,3*sh,6*sw)
+    fnt=fnt or font; love.graphics.setFont(fnt); setc(enabled==false and UI.dim or UI.text); love.graphics.printf(label,x,y+(h-fnt:getHeight())/2,w,"center")
+end
+local function bar(x,y,w,h,frac,col,label)
+    frac=math.max(0,math.min(1,frac)); love.graphics.setColor(0,0,0,0.5); rrect("fill",x,y,w,h,h/2)
+    if frac>0 then setc(col); rrect("fill",x,y,math.max(h,w*frac),h,h/2); love.graphics.setColor(1,1,1,0.2); rrect("fill",x+h/2,y+1.5*sh,math.max(0,w*frac-h),h*0.3,h*0.2) end
+    if label then love.graphics.setFont(font_sm); love.graphics.setColor(1,1,1,0.95); love.graphics.printf(label,x,y+(h-font_sm:getHeight())/2,w,"center") end
+end
+local function mat_chip(m, x, y, s) setc(MAT_COLOR[m]); rrect("fill",x-s,y-s,s*2,s*2,s*0.4); love.graphics.setColor(0,0,0,0.3); rrect("line",x-s,y-s,s*2,s*2,s*0.4) end
+
+-- ============================================================================
+-- 战斗场景
+-- ============================================================================
+local function draw_combat()
+    local px,py = sx(70), DESIGN_H*0.22*sh
+    love.graphics.setColor(0.85,0.7,0.55); love.graphics.circle("fill",px,py-sy(24),sx(8))
+    love.graphics.setColor(0.4,0.38,0.34); love.graphics.setLineWidth(2*sw); love.graphics.line(px,py-sy(18),px,py+sy(6))
+    love.graphics.setColor(0.6,0.45,0.2); love.graphics.arc("line","open",px+sx(10),py-sy(8),sx(13),-1.1,1.1); love.graphics.setLineWidth(1)
+    if enemy then
+        local ex,ey = enemy.x*sw, py; local alpha,scl=1,1
+        if enemy.phase=="dying" then local k=math.min(1,enemy.phase_t/DEATH_TIME); alpha=1-k; scl=1+k*0.4
+        elseif enemy.phase=="enter" then alpha=math.min(1,enemy.phase_t/(ENTER_TIME*0.5)) end
+        local r=sx(28)*(1+enemy.hurt*0.3)*scl
+        if enemy.flash>0 then love.graphics.setColor(1,1,1,alpha) else setc(enemy.color,alpha) end
+        love.graphics.circle("fill",ex,ey-r*0.4,r); love.graphics.setColor(0.1,0.1,0.12,alpha)
+        love.graphics.circle("fill",ex-r*0.3,ey-r*0.5,r*0.12); love.graphics.circle("fill",ex+r*0.3,ey-r*0.5,r*0.12)
+        if enemy.phase=="fight" then
+            love.graphics.setFont(font_sm); setc(UI.text); love.graphics.printf(enemy.name.."  Lv"..enemy.level, ex-sx(80),ey-r-sy(34),sx(160),"center")
+            bar(ex-sx(60),ey+sy(16),sx(120),sy(11),enemy.hp/enemy.max_hp,UI.bad,math.floor(enemy.hp))
+            bar(ex-sx(60),ey+sy(30),sx(120),sy(5),enemy.atb,{0.9,0.7,0.3})
+        elseif enemy.phase=="enter" then love.graphics.setFont(font_sm); setc(UI.dim,alpha); love.graphics.printf("approaching...",ex-sx(70),ey-r-sy(28),sx(140),"center") end
+    end
+    for _,p in ipairs(particles) do local a=math.max(0,p.life/p.max); love.graphics.setColor(p.color[1],p.color[2],p.color[3],a); love.graphics.rectangle("fill",p.x*sw-p.size*sw/2,p.y*sh-p.size*sh/2,p.size*sw,p.size*sh) end
+    if projectile then setc(projectile.crit and UI.gold or projectile.color); love.graphics.setLineWidth(3*sw); love.graphics.line(projectile.x*sw-sx(12),projectile.y*sh,projectile.x*sw,projectile.y*sh); love.graphics.setLineWidth(1) end
+    bar(px-sx(34),py+sy(20),sx(96),sy(10),player.hp/player.max_hp,UI.good,math.floor(player.hp).."/"..player.max_hp)
+    bar(px-sx(34),py+sy(33),sx(96),sy(5),player.atb,{0.4,0.7,1.0})
+end
+
+local function draw_hud()
+    local w=love.graphics.getWidth()
+    love.graphics.setColor(0.05,0.06,0.1,0.92); love.graphics.rectangle("fill",0,0,w,sy(72))
+    love.graphics.setColor(UI.btn[1],UI.btn[2],UI.btn[3],0.5); love.graphics.rectangle("fill",0,sy(72)-2*sh,w,2*sh)
+    love.graphics.setFont(font_med); setc(UI.text); love.graphics.print("Lv "..player.level, sx(10), sy(5))
+    love.graphics.setFont(font_sm); setc(UI.dim); love.graphics.print(region.name, sx(10), sy(28))
+    bar(sx(72),sy(11),sx(150),sy(10),player.xp/player.xp_next,UI.xp,math.floor(player.xp).."/"..player.xp_next)
+    love.graphics.setFont(font_sm); local cx=sx(235)
+    for _,k in ipairs(ATTRS) do setc(ATTR_COLOR[k]); love.graphics.print(ATTR_NAME[k],cx,sy(6)); setc(UI.text); love.graphics.print(player[k],cx,sy(20)); cx=cx+sx(42) end
+    setc(UI.gold); love.graphics.print("G "..player.gold, sx(235), sy(40))
+    -- 当前箭档 + 数量
+    local atxt = player.arrow_tier and (player.arrow_tier.name.." x"..(player.arrows[player.arrow_tier.id] or 0)) or "No Arrows (0.5x)"
+    setc(player.arrow_tier and player.arrow_tier.color or UI.bad); love.graphics.print(atxt, sx(10), sy(45))
+    setc(UI.dim); love.graphics.print(string.format("ATK %d  AS %.2f  Crit %d%%  DPS %d", math.floor(player.attack), player.atk_speed, math.floor(player.crit*100), math.floor(player.dps)), sx(10), sy(58))
+    if toast then love.graphics.setFont(font_sm); setc(toast.color,math.min(1,toast.timer)); love.graphics.printf(toast.text,0,sy(76),w-sx(8),"right") end
+end
+
+local function bottom_btns()
+    local w,h=love.graphics.getWidth(),love.graphics.getHeight()
+    local by=h-sy(44); local bw=(w-sx(40))/3
+    button(sx(10),by,bw,sy(34),"Regions",{0.3,0.5,0.7},true,font_sm)
+    button(sx(15)+bw,by,bw,sy(34),"Camp",{0.5,0.4,0.65},true,font_sm)
+    button(sx(20)+bw*2,by,bw,sy(34),"Gear "..#player.bag,UI.btn,true,font_sm)
+end
+
+-- ============================================================================
+-- 地区
+-- ============================================================================
+local function draw_regions()
+    local w,h=love.graphics.getWidth(),love.graphics.getHeight(); love.graphics.setColor(0,0,0,0.72); love.graphics.rectangle("fill",0,0,w,h)
+    local px,py,pw,ph=sx(16),sy(56),w-sx(32),h-sy(112); panel(px,py,pw,ph,{0.09,0.1,0.15,0.98},UI.line,10*sw)
+    love.graphics.setFont(font_med); setc(UI.text); love.graphics.printf("REGIONS",px,py+sy(8),pw,"center")
+    love.graphics.setFont(font_sm); setc(UI.dim); love.graphics.printf("higher = better loot & materials, tougher foes",px,py+sy(30),pw,"center")
+    local ry=py+sy(52); local rh=sy(72)
+    for i,rg in ipairs(REGIONS) do
+        local y=ry+(i-1)*(rh+sy(8)); local cur=(rg.id==region.id)
+        panel(px+sx(10),y,pw-sx(20),rh,cur and {0.15,0.2,0.3,0.97} or {0.11,0.12,0.17,0.95},cur and UI.btn or UI.line,8*sw)
+        love.graphics.setFont(font); setc(UI.text); love.graphics.print(rg.name,px+sx(22),y+sy(8))
+        love.graphics.setFont(font_sm); setc(UI.dim); love.graphics.print("Enemy Lv "..rg.level.."   Drop ilvl "..rg.ilvl,px+sx(22),y+sy(28))
+        local seen={}; local dx=px+sx(22)
+        for _,rid in ipairs(rg.rar) do if not seen[rid] then seen[rid]=true; setc(RAR[rid].color); love.graphics.circle("fill",dx+sx(6),y+sy(52),sx(5)); dx=dx+sx(18) end end
+        if cur then setc(UI.good); love.graphics.setFont(font_sm); love.graphics.printf("HUNTING",px+sx(10),y+sy(8),pw-sx(40),"right") end
+    end
+    button(px+pw/2-sx(64),py+ph-sy(40),sx(128),sy(30),"Back",{0.4,0.4,0.5},true)
+end
+
+-- ============================================================================
+-- 营地（挂机产线 + 制作）
+-- ============================================================================
+local function draw_camp()
+    local w,h=love.graphics.getWidth(),love.graphics.getHeight(); love.graphics.setColor(0,0,0,0.72); love.graphics.rectangle("fill",0,0,w,h)
+    local px,py,pw,ph=sx(16),sy(56),w-sx(32),h-sy(112); panel(px,py,pw,ph,{0.09,0.1,0.15,0.98},UI.line,10*sw)
+    love.graphics.setFont(font_med); setc(UI.text); love.graphics.printf("CAMP",px,py+sy(8),pw,"center")
+    love.graphics.setFont(font_sm); setc(UI.dim); love.graphics.printf("idle lines run while you play — balance them to feed your arrows",px,py+sy(30),pw,"center")
+
+    -- 采集产线
+    local lx, lw = px+sx(10), pw-sx(20)
+    local function line_row(y, key, title, rate_txt)
+        panel(lx, y, lw, sy(46), {0.11,0.12,0.17,0.95}, UI.line, 6*sw)
+        setc(UI.text); love.graphics.setFont(font); love.graphics.print(title.."  Lv "..player.lines[key], lx+sx(12), y+sy(6))
+        setc(UI.dim); love.graphics.setFont(font_sm); love.graphics.print(rate_txt, lx+sx(12), y+sy(26))
+        local c = line_cost(player.lines[key]); local ok = player.gold>=c
+        button(lx+lw-sx(96), y+sy(8), sx(86), sy(30), "Up  "..c.."g", ok and {0.3,0.6,0.5} or UI.btn, ok, font_sm)
+    end
+    local gy = py+sy(50)
+    line_row(gy,        "wood", "Woodcutting", string.format("+%.1f wood/s", WOOD_RATE*player.lines.wood))
+    line_row(gy+sy(54), "iron", "Mining",      string.format("+%.1f iron/s  +%.2f dust/s", IRON_RATE*player.lines.iron, DUST_RATE*player.lines.iron))
+    line_row(gy+sy(108),"fletch","Fletching",  string.format("auto-crafts best arrow ~%.1f/s", FLETCH_RATE*player.lines.fletch))
+    -- 自动开关
+    setc(player.fletch_auto and UI.good or UI.dim); love.graphics.setFont(font_sm)
+    button(lx, gy+sy(150), sx(120), sy(26), player.fletch_auto and "Auto: ON" or "Auto: OFF", player.fletch_auto and {0.3,0.6,0.4} or {0.4,0.3,0.3}, true, font_sm)
+    setc(UI.dim); love.graphics.print("(combat drops Sinew)", lx+sx(132), gy+sy(154))
+
+    -- 手动制作四档（紧凑）
+    local cy = gy+sy(186)
+    setc(UI.dim); love.graphics.setFont(font_sm); love.graphics.print("Manual fletch:", lx, cy-sy(2))
+    for i,tier in ipairs(ARROW_TIERS) do
+        local y=cy+sy(16)+(i-1)*sy(38)
+        panel(lx, y, lw, sy(34), {tier.color[1]*0.15,tier.color[2]*0.15,tier.color[3]*0.18,0.95}, {tier.color[1]*0.6,tier.color[2]*0.6,tier.color[3]*0.6}, 5*sw)
+        setc(tier.color); love.graphics.rectangle("fill",lx,y,4*sw,sy(34),2*sw,2*sw)
+        setc(tier.color); love.graphics.setFont(font_sm); love.graphics.print(tier.name, lx+sx(12), y+sy(3))
+        setc(UI.dim); love.graphics.print(string.format("x%.1f  have %d", tier.mult, player.arrows[tier.id] or 0), lx+sx(12), y+sy(18))
+        -- cost chips
+        local ccx=lx+sx(150); for m,n in pairs(tier.cost) do mat_chip(m,ccx+sx(5),y+sy(17),sx(5)); setc((player.mats[m] or 0)>=n and UI.text or UI.bad); love.graphics.print("x"..n, ccx+sx(13), y+sy(10)); ccx=ccx+sx(46) end
+        local ok=can_craft(tier)
+        button(lx+lw-sx(70), y+sy(5), sx(62), sy(24), "+"..ARROW_BATCH, ok and {0.3,0.7,0.4} or UI.btn, ok, font_sm)
+    end
+
+    -- 材料栏
+    local my=py+ph-sy(56); love.graphics.setColor(0.06,0.07,0.11,0.9); rrect("fill",px+sx(6),my-sy(4),pw-sx(12),sy(24),5*sw)
+    local mw=(pw-sx(12))/#MATERIALS
+    for i,m in ipairs(MATERIALS) do local mx=px+sx(6)+(i-1)*mw; mat_chip(m,mx+sx(16),my+sy(8),sx(6)); setc(UI.text); love.graphics.setFont(font_sm); love.graphics.print((MAT_NAME[m])..": "..(player.mats[m] or 0), mx+sx(26),my+sy(2)) end
+    button(px+pw/2-sx(60),py+ph-sy(32),sx(120),sy(26),"Back",{0.4,0.4,0.5},true)
+end
+
+-- ============================================================================
+-- 装备栏（WoW 式 paperdoll + Bag）
+-- ============================================================================
+local gear_tab = "doll"
+local tooltip = nil   -- { g=gear, src="equip"|"bag", idx=bagindex }
+-- 槽位类型图标（4 种，复用）
+local function icon_kind(kind, cx, cy, s, col)
+    setc(col); love.graphics.setLineWidth(math.max(1,1.6*sw))
+    if kind=="weapon" then
+        love.graphics.arc("line","open",cx-s*0.2,cy,s,-1.0,1.0)
+        love.graphics.line(cx-s*0.2+s*math.cos(-1.0),cy+s*math.sin(-1.0), cx-s*0.2+s*math.cos(1.0),cy+s*math.sin(1.0))
+    elseif kind=="quiver" then
+        love.graphics.polygon("line", cx-s*0.5,cy-s, cx+s*0.5,cy-s, cx+s*0.35,cy+s, cx-s*0.35,cy+s)
+        love.graphics.line(cx-s*0.2,cy-s,cx-s*0.2,cy-s*1.4); love.graphics.line(cx+s*0.2,cy-s,cx+s*0.2,cy-s*1.4)
+    elseif kind=="armor" then
+        love.graphics.polygon("line", cx,cy-s, cx+s*0.9,cy-s*0.4, cx+s*0.6,cy+s, cx,cy+s*1.1, cx-s*0.6,cy+s, cx-s*0.9,cy-s*0.4)
+    else
+        love.graphics.polygon("line", cx,cy-s, cx+s*0.8,cy, cx,cy+s, cx-s*0.8,cy)
+    end
+    love.graphics.setLineWidth(1)
+end
+local function gear_summary(g)
+    local a={}; add_gear_stats(g,a); local parts={}
+    if a.weapon_attack then parts[#parts+1]="ATK "..a.weapon_attack end
+    for _,k in ipairs(ATTRS) do if a[k] then parts[#parts+1]="+"..a[k].." "..ATTR_NAME[k] end end
+    if a.armor then parts[#parts+1]="Arm "..a.armor end
+    if a.crit_pct then parts[#parts+1]="+"..a.crit_pct.."% Crit" end
+    return table.concat(parts, "   ")
+end
+
+-- 物品详情的逐行内容（基础属性白/属性彩、词缀绿）
+local function gear_detail_lines(g)
+    local lines = {}
+    local s = g.stats
+    if s.weapon_attack then lines[#lines+1] = { "Weapon Attack  +"..s.weapon_attack, UI.text } end
+    for _,k in ipairs(ATTRS) do if s[k] then lines[#lines+1] = { "+"..s[k].."  "..ATTR_NAME[k], ATTR_COLOR[k] } end end
+    if s.armor then lines[#lines+1] = { "Armor  +"..s.armor, UI.text } end
+    for _,af in ipairs(g.affixes) do
+        local txt = af.pct and ("+"..af.val.."%  "..(af.key=="crit" and "Crit" or ATTR_NAME[af.key] or af.key))
+                            or ("+"..af.val.."  "..(ATTR_NAME[af.key] or af.key))
+        lines[#lines+1] = { txt, {0.45,0.85,0.55} }
+    end
+    return lines
+end
+
+-- tooltip 几何（draw 与 press 共用，保证点击对齐）
+local function tt_geom(g)
+    local W,H = love.graphics.getWidth(), love.graphics.getHeight()
+    local lines = gear_detail_lines(g)
+    local tw = sx(290)
+    local th = sy(66) + #lines*sy(20) + sy(50)
+    local tx, ty = (W-tw)/2, (H-th)/2
+    return tx, ty, tw, th, lines
+end
+
+-- 点击弹出的物品详情 tip（WoW 风）
+local function draw_tooltip()
+    if not tooltip then return end
+    local g = tooltip.g
+    local W,H = love.graphics.getWidth(), love.graphics.getHeight()
+    love.graphics.setColor(0,0,0,0.55); love.graphics.rectangle("fill",0,0,W,H)
+    local tx,ty,tw,th,lines = tt_geom(g)
+    local rc = gear_color(g)
+    panel(tx,ty,tw,th,{0.1,0.11,0.16,0.99},rc,10*sw)
+    -- 标题（稀有色）
+    setc(rc); love.graphics.setFont(font_med); love.graphics.printf(gear_full_name(g), tx+sx(14), ty+sy(10), tw-sx(28), "left")
+    -- 副标题
+    setc(UI.dim); love.graphics.setFont(font_sm)
+    love.graphics.printf(RAR[g.rarity].name.."  ·  "..SLOT_INFO[g.slot].name.."  ·  ilvl "..g.ilvl, tx+sx(14), ty+sy(36), tw-sx(28), "left")
+    -- 分隔线
+    setc(UI.line); love.graphics.rectangle("fill", tx+sx(14), ty+sy(56), tw-sx(28), 1*sh)
+    -- 属性 / 词缀
+    local yy = ty+sy(64)
+    for _,ln in ipairs(lines) do setc(ln[2]); love.graphics.print(ln[1], tx+sx(18), yy); yy = yy + sy(20) end
+    -- 底部按钮
+    local fy = ty+th-sy(40)
+    if tooltip.src=="bag" then
+        local bw=(tw-sx(40))/2
+        button(tx+sx(14), fy, bw, sy(30), "Equip", {0.3,0.6,0.4}, true, font_sm)
+        button(tx+sx(26)+bw, fy, bw, sy(30), "Close", {0.4,0.4,0.5}, true, font_sm)
+    else
+        button(tx+tw/2-sx(60), fy, sx(120), sy(30), "Close", {0.4,0.4,0.5}, true, font_sm)
+    end
+end
+
+local function tooltip_press(x,y)
+    local g = tooltip.g
+    local tx,ty,tw,th = tt_geom(g)
+    local fy = ty+th-sy(40)
+    if tooltip.src=="bag" then
+        local bw=(tw-sx(40))/2
+        if x>=tx+sx(14) and x<=tx+sx(14)+bw and y>=fy and y<=fy+sy(30) then
+            -- Equip from bag
+            local i = tooltip.idx
+            if player.bag[i]==g then table.remove(player.bag,i) end
+            local old=player.equip[g.slot]; player.equip[g.slot]=g; if old then player.bag[#player.bag+1]=old end
+            recalc(); tooltip=nil; return
+        end
+    end
+    tooltip=nil  -- 点其它地方/Close 都关闭
+end
+
+
+local function draw_gear()
+    local w,h=love.graphics.getWidth(),love.graphics.getHeight(); love.graphics.setColor(0,0,0,0.72); love.graphics.rectangle("fill",0,0,w,h)
+    local px,py,pw,ph=sx(16),sy(56),w-sx(32),h-sy(112); panel(px,py,pw,ph,{0.09,0.1,0.15,0.98},UI.line,10*sw)
+    love.graphics.setFont(font_med); setc(UI.text); love.graphics.printf("CHARACTER",px,py+sy(8),pw,"center")
+    -- Tab
+    local tw=(pw-sx(20))/2
+    for i,td in ipairs({{"doll","Equipped"},{"bag","Bag "..#player.bag}}) do
+        local tx=px+sx(10)+(i-1)*tw; local act=gear_tab==td[1]
+        setc(act and UI.btn or {0.16,0.17,0.24}); rrect("fill",tx+sx(2),py+sy(30),tw-sx(4),sy(24),5*sw)
+        setc(act and UI.text or UI.dim); love.graphics.setFont(font_sm); love.graphics.printf(td[2],tx,py+sy(35),tw,"center")
+    end
+
+    if gear_tab=="doll" then
+        -- 顶部：角色总览卡（聚合属性一眼看清）
+        local cy=py+sy(58)
+        panel(px+sx(10),cy,pw-sx(20),sy(46),{0.13,0.15,0.22,0.97},UI.line,7*sw)
+        love.graphics.setFont(font_sm)
+        for j,k in ipairs(ATTRS) do setc(ATTR_COLOR[k]); love.graphics.print(ATTR_NAME[k].." "..player[k], px+sx(20)+(j-1)*sx(70), cy+sy(6)) end
+        setc(UI.text); love.graphics.print(string.format("ATK %d   AS %.2f   Crit %d%%", math.floor(player.attack), player.atk_speed, math.floor(player.crit*100)), px+sx(20), cy+sy(26))
+        setc(UI.dim); love.graphics.printf(string.format("HP %d  Arm %d  DPS %d", player.max_hp, player.armor, math.floor(player.dps)), px+sx(20), cy+sy(26), pw-sx(30), "right")
+        -- 11 槽位列表：图标 + 槽名 + 物品名(稀有色)，点击看详情
+        love.graphics.setFont(font_sm); setc(UI.dim)
+        love.graphics.printf("tap an item for details", px, py+sy(50), pw-sx(14), "right")
+        local ly=cy+sy(54); local rh=sy(38)
+        for i,slot in ipairs(SLOTS) do
+            local y=ly+(i-1)*(rh+sy(3)); local g=player.equip[slot]; local info=SLOT_INFO[slot]
+            local rc = g and gear_color(g) or {0.32,0.33,0.4}
+            panel(px+sx(10),y,pw-sx(20),rh,{0.11,0.12,0.17,0.95},rc,6*sw)
+            setc(rc); love.graphics.rectangle("fill",px+sx(10),y,3*sw,rh,1.5*sw,1.5*sw)
+            icon_kind(info.kind, px+sx(28), y+rh/2, sx(8), rc)
+            setc(UI.dim); love.graphics.setFont(font_sm); love.graphics.print(info.name, px+sx(46), y+sy(3))
+            if g then
+                setc(rc); love.graphics.print(gear_full_name(g).."   i"..g.ilvl, px+sx(46), y+sy(19))
+                setc(UI.dim); love.graphics.printf("›", px+sx(46), y+sy(11), pw-sx(40), "right")
+            else
+                setc({0.42,0.42,0.48}); love.graphics.print("— empty —", px+sx(46), y+sy(19))
+            end
+        end
+    else
+        local ly=py+sy(60); local cardh=sy(44)
+        if #player.bag==0 then setc(UI.dim); love.graphics.setFont(font_sm); love.graphics.printf("Bag empty.\nLoot drops here.",px,py+ph/2-sy(10),pw,"center") end
+        for i,g in ipairs(player.bag) do
+            local y=ly+(i-1)*(cardh+sy(5)); if y+cardh>py+ph-sy(46) then break end
+            local rc=gear_color(g); panel(px+sx(10),y,pw-sx(20),cardh,{rc[1]*0.16,rc[2]*0.16,rc[3]*0.18,0.95},{rc[1]*0.7,rc[2]*0.7,rc[3]*0.7},6*sw)
+            setc(rc); love.graphics.rectangle("fill",px+sx(10),y,3*sw,cardh,1.5*sw,1.5*sw)
+            icon_kind(SLOT_INFO[g.slot].kind, px+sx(28), y+cardh/2, sx(9), rc)
+            setc(rc); love.graphics.setFont(font_sm); love.graphics.print(gear_full_name(g), px+sx(46), y+sy(5))
+            setc(UI.dim); love.graphics.print(SLOT_INFO[g.slot].name.."   i"..g.ilvl, px+sx(46), y+sy(23))
+            setc(UI.dim); love.graphics.printf("tap ›", px+sx(46), y+sy(14), pw-sx(40), "right")
+        end
+    end
+    button(px+pw/2-sx(64),py+ph-sy(34),sx(128),sy(28),"Back",{0.4,0.4,0.5},true)
+end
+
+-- ============================================================================
+-- love 回调
+-- ============================================================================
+function love.load()
+    font=love.graphics.newFont(15); font_sm=love.graphics.newFont(12); font_med=love.graphics.newFont(19); font_big=love.graphics.newFont(30)
+    sw=love.graphics.getWidth()/DESIGN_W; sh=love.graphics.getHeight()/DESIGN_H; init()
+end
+function love.update(dt) if dt>0.05 then dt=0.05 end update(dt) end
+function love.draw()
+    love.graphics.setBackgroundColor(UI.bg)
+    local ox,oy=0,0; if shake>0 then ox=(math.random()*2-1)*shake; oy=(math.random()*2-1)*shake end
+    love.graphics.push(); love.graphics.translate(ox,oy)
+    draw_combat(); draw_hud(); if screen=="combat" then bottom_btns() end
+    for _,f in ipairs(floats) do love.graphics.setFont(f.scale>1.2 and font_med or font_sm); love.graphics.setColor(f.color[1],f.color[2],f.color[3],math.min(1,f.timer*2)); love.graphics.printf(f.text,f.x*sw-sx(60),f.y*sh,sx(120),"center") end
+    if screen=="regions" then draw_regions() elseif screen=="camp" then draw_camp() elseif screen=="gear" then draw_gear(); draw_tooltip() end
+    if result_banner=="defeat" then
+        love.graphics.setColor(0,0,0,0.7); love.graphics.rectangle("fill",0,0,love.graphics.getWidth(),love.graphics.getHeight())
+        love.graphics.setFont(font_big); setc(UI.bad); love.graphics.printf("DEFEATED",0,love.graphics.getHeight()*0.4,love.graphics.getWidth(),"center")
+        love.graphics.setFont(font_sm); setc(UI.dim); love.graphics.printf("Lv "..player.level.." · Tap to revive",0,love.graphics.getHeight()*0.5,love.graphics.getWidth(),"center")
+    end
+    love.graphics.pop()
+end
+
+local function hit(x,y,rx,ry,rw,rh) return x>=rx and x<=rx+rw and y>=ry and y<=ry+rh end
+local function press(x,y)
+    if result_banner=="defeat" then player.hp=player.max_hp; result_banner=nil; next_enemy(); return end
+    local w,h=love.graphics.getWidth(),love.graphics.getHeight()
+    if screen=="combat" then
+        local by=h-sy(44); local bw=(w-sx(40))/3
+        if hit(x,y,sx(10),by,bw,sy(34)) then screen="regions"; return end
+        if hit(x,y,sx(15)+bw,by,bw,sy(34)) then screen="camp"; return end
+        if hit(x,y,sx(20)+bw*2,by,bw,sy(34)) then screen="gear"; gear_tab="doll"; return end
+    elseif screen=="regions" then
+        local px,py,pw,ph=sx(16),sy(56),w-sx(32),h-sy(112); local ry=py+sy(52); local rh=sy(72)
+        for i,rg in ipairs(REGIONS) do local y=ry+(i-1)*(rh+sy(8)); if hit(x,y,px+sx(10),y,pw-sx(20),rh) then region=rg; stage=0; next_enemy(); screen="combat"; set_toast("Now hunting "..rg.name,UI.good); return end end
+        if hit(x,y,px+pw/2-sx(64),py+ph-sy(40),sx(128),sy(30)) then screen="combat"; return end
+    elseif screen=="camp" then
+        local px,py,pw,ph=sx(16),sy(56),w-sx(32),h-sy(112)
+        local lx,lw=px+sx(10),pw-sx(20); local gy=py+sy(50)
+        -- 三条产线升级按钮
+        if hit(x,y,lx+lw-sx(96),gy+sy(8),sx(86),sy(30)) then upgrade_line("wood"); return end
+        if hit(x,y,lx+lw-sx(96),gy+sy(54)+sy(8),sx(86),sy(30)) then upgrade_line("iron"); return end
+        if hit(x,y,lx+lw-sx(96),gy+sy(108)+sy(8),sx(86),sy(30)) then upgrade_line("fletch"); return end
+        -- 自动开关
+        if hit(x,y,lx,gy+sy(150),sx(120),sy(26)) then player.fletch_auto = not player.fletch_auto; return end
+        -- 手动制作四档
+        local cy=gy+sy(186)
+        for i,tier in ipairs(ARROW_TIERS) do local y=cy+sy(16)+(i-1)*sy(38); if hit(x,y,lx+lw-sx(70),y+sy(5),sx(62),sy(24)) then craft(tier); return end end
+        if hit(x,y,px+pw/2-sx(60),py+ph-sy(32),sx(120),sy(26)) then screen="combat"; return end
+    elseif screen=="gear" then
+        if tooltip then tooltip_press(x,y); return end
+        local px,py,pw,ph=sx(16),sy(56),w-sx(32),h-sy(112)
+        local tw=(pw-sx(20))/2
+        for i,t in ipairs({"doll","bag"}) do if hit(x,y,px+sx(10)+(i-1)*tw,py+sy(30),tw,sy(24)) then gear_tab=t; return end end
+        if hit(x,y,px+pw/2-sx(64),py+ph-sy(34),sx(128),sy(28)) then screen="combat"; return end
+        if gear_tab=="doll" then
+            -- 点装备槽 → 弹详情
+            local cy=py+sy(58); local ly=cy+sy(54); local rh=sy(38)
+            for i,slot in ipairs(SLOTS) do
+                local y=ly+(i-1)*(rh+sy(3)); local g=player.equip[slot]
+                if g and hit(x,y,px+sx(10),y,pw-sx(20),rh) then tooltip={ g=g, src="equip" }; return end
+            end
+        else
+            -- 点背包物品 → 弹详情(内含 Equip)
+            local ly=py+sy(60); local cardh=sy(44)
+            for i,g in ipairs(player.bag) do local y=ly+(i-1)*(cardh+sy(5)); if y+cardh>py+ph-sy(46) then break end
+                if hit(x,y,px+sx(10),y,pw-sx(20),cardh) then tooltip={ g=g, src="bag", idx=i }; return end end
+        end
+    end
+end
+function love.touchpressed(id,x,y) press(x,y) end
+function love.mousepressed(x,y,b) if b==1 then press(x,y) end end
+function love.resize() sw=love.graphics.getWidth()/DESIGN_W; sh=love.graphics.getHeight()/DESIGN_H end
