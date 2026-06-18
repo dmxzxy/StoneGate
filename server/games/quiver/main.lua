@@ -65,25 +65,37 @@ local AFFIXES = {
     { key="sta", name="+%d STA" }, { key="crit", name="+%d%% Crit", pct=true },
 }
 
--- 原材料
-local MATERIALS = { "wood","iron","sinew","dust" }
-local MAT_NAME = { wood="Wood", iron="Iron", sinew="Sinew", dust="Dust" }
-local MAT_COLOR = { wood={0.6,0.42,0.22}, iron={0.72,0.74,0.8}, sinew={0.85,0.8,0.6}, dust={0.7,0.45,1.0} }
+-- 原材料：每种由一类挂机产出
+local MATERIALS = { "wood","ore","herb" }
+local MAT_NAME = { wood="Wood", ore="Ore", herb="Herb" }
+local MAT_COLOR = { wood={0.62,0.44,0.24}, ore={0.7,0.72,0.78}, herb={0.45,0.8,0.45} }
 
 -- 箭矢分档（低→高）。mult 乘在攻击上；cost 是制作 BATCH 支的材料。
 local ARROW_BATCH = 20
 local ARROW_TIERS = {
-    { id="wood",  name="Wood Arrow",  mult=1.0, color={0.6,0.45,0.25}, cost={ wood=3 } },
-    { id="iron",  name="Iron Arrow",  mult=1.3, color={0.7,0.72,0.78}, cost={ wood=1, iron=3 } },
-    { id="steel", name="Steel Arrow", mult=1.7, color={0.85,0.86,0.92},cost={ iron=4, sinew=2 } },
-    { id="rune",  name="Rune Arrow",  mult=2.2, color={0.75,0.45,1.0}, cost={ iron=3, sinew=2, dust=3 } },
+    { id="wood",   name="Wood Arrow",   mult=1.0,  color={0.62,0.46,0.26}, cost={ wood=3 } },
+    { id="iron",   name="Iron Arrow",   mult=1.35, color={0.72,0.74,0.8},  cost={ wood=2, ore=3 } },
+    { id="hunter", name="Hunter Arrow", mult=1.75, color={0.5,0.85,0.55},  cost={ wood=2, ore=2, herb=3 } },
+    { id="rune",   name="Rune Arrow",   mult=2.3,  color={0.78,0.5,1.0},   cost={ wood=3, ore=4, herb=4 } },
 }
 
+-- 挂机活动：一次只挂一种。gather 产材料，fletch 制箭，combat 打怪，rest 啥也不干。
+local ACTIVITIES = {
+    rest    = { name="Rest",        kind="rest" },
+    woodcut = { name="Woodcutting", kind="gather", mat="wood", base=0.8 },
+    mining  = { name="Mining",      kind="gather", mat="ore",  base=0.6 },
+    herb    = { name="Herbalism",   kind="gather", mat="herb", base=0.7 },
+    fletch  = { name="Fletching",   kind="craft" },
+    combat  = { name="Combat",      kind="combat" },
+}
+local ACT_ORDER = { "rest", "woodcut", "mining", "herb", "fletch", "combat" }
+local FLETCH_BASE = 0.25   -- 每秒每级的「制作进度」(满 1 出一批)
+
 local REGIONS = {
-    { id="meadow", name="Green Meadow", level=1,  ilvl=3,  rar={"uncommon","uncommon","rare"}, enemies={"boar","wolf"},          mats={"wood","wood","iron"} },
-    { id="forest", name="Dark Forest",  level=6,  ilvl=10, rar={"uncommon","rare","rare"},     enemies={"wolf","bandit","ogre"}, mats={"wood","iron","sinew"} },
-    { id="ruins",  name="Sunken Ruins", level=14, ilvl=20, rar={"rare","rare","epic"},         enemies={"bandit","ogre","wraith"},mats={"iron","sinew","dust"} },
-    { id="peak",   name="Frost Peak",   level=24, ilvl=32, rar={"rare","epic","epic"},         enemies={"ogre","wraith","golem"}, mats={"sinew","dust","dust"} },
+    { id="meadow", name="Green Meadow", level=1,  ilvl=3,  rar={"uncommon","uncommon","rare"}, enemies={"boar","wolf"} },
+    { id="forest", name="Dark Forest",  level=6,  ilvl=10, rar={"uncommon","rare","rare"},     enemies={"wolf","bandit","ogre"} },
+    { id="ruins",  name="Sunken Ruins", level=14, ilvl=20, rar={"rare","rare","epic"},         enemies={"bandit","ogre","wraith"} },
+    { id="peak",   name="Frost Peak",   level=24, ilvl=32, rar={"rare","epic","epic"},         enemies={"ogre","wraith","golem"} },
 }
 local ENEMY_ARCH = {
     boar  ={ name="Boar",        hp=1.0, dmg=1.0, armor=0.3, spd=0.55, color={0.6,0.45,0.35} },
@@ -105,8 +117,10 @@ local UI = {
 -- ============================================================================
 local player, enemy, stage, region
 local floats, particles, projectile
-local screen = "combat"     -- combat | regions | gear | craft
+local activity = "rest"      -- 当前挂机活动：rest|woodcut|mining|herb|fletch|combat
+local panel_open = nil       -- 覆盖菜单：nil|"activity"|"gear"|"region"
 local result_banner, toast
+local swing = 0              -- 采集挥动动画相位
 
 local function sx(v) return v*sw end
 local function sy(v) return v*sh end
@@ -206,32 +220,46 @@ local function craft(tier)
 end
 
 -- ============================================================================
--- 挂机产线：砍树→木, 挖矿→铁/尘, 制造→自动 fletch。战斗→兽筋(在 drop_loot)。
--- 几条线同跑、产出汇入同一材料池；线之间的配比 = 你想要的「工厂」感。
+-- 挂机活动：一次只挂一种。gather 产对应材料；fletch 一组组制箭；combat 在下面。
+-- 技能等级越高，对应活动越快；升级在活动菜单里花金币。
 -- ============================================================================
-local WOOD_RATE, IRON_RATE, DUST_RATE = 0.7, 0.45, 0.07   -- 每秒每级
-local FLETCH_RATE = 0.2                                     -- 每秒每级的「制作动作」数
-local function line_cost(lvl) return math.floor(15 * (lvl ^ 1.7) + 10) end
-local function upgrade_line(key)
-    local c = line_cost(player.lines[key])
-    if player.gold >= c then player.gold = player.gold - c; player.lines[key] = player.lines[key] + 1 end
+local function skill_cost(lvl) return math.floor(15 * (lvl ^ 1.7) + 10) end
+local function upgrade_skill(key)
+    local c = skill_cost(player.skill[key] or 1)
+    if player.gold >= c then player.gold = player.gold - c; player.skill[key] = (player.skill[key] or 1) + 1 end
 end
 
-local function production_tick(dt)
-    local L = player.lines; local acc = player.acc
-    acc.wood = acc.wood + WOOD_RATE * L.wood * dt
-    acc.iron = acc.iron + IRON_RATE * L.iron * dt
-    acc.dust = acc.dust + DUST_RATE * L.iron * dt
-    local function flush(k, m) while acc[k] >= 1 do player.mats[m] = (player.mats[m] or 0) + 1; acc[k] = acc[k] - 1 end end
-    flush("wood","wood"); flush("iron","iron"); flush("dust","dust")
-    -- 自动制造：每个制作动作，造一批当前能负担的最高档箭
-    if player.fletch_auto then
-        acc.fletch = acc.fletch + FLETCH_RATE * L.fletch * dt
-        while acc.fletch >= 1 do
-            acc.fletch = acc.fletch - 1
-            local made = false
-            for i = #ARROW_TIERS, 1, -1 do if can_craft(ARROW_TIERS[i]) then craft(ARROW_TIERS[i]); made = true; break end end
-            if not made then acc.fletch = 0; break end   -- 材料不够，别空转
+-- 当前 fletch 目标：能负担的最高档（返回 tier 或 nil）
+local function best_affordable_tier()
+    for i = #ARROW_TIERS, 1, -1 do if can_craft(ARROW_TIERS[i]) then return ARROW_TIERS[i] end end
+    return nil
+end
+
+local function activity_tick(dt)
+    local a = ACTIVITIES[activity]
+    if a.kind == "gather" then
+        local lvl = player.skill[activity] or 1
+        player.acc = (player.acc or 0) + a.base * lvl * dt
+        while player.acc >= 1 do
+            player.mats[a.mat] = (player.mats[a.mat] or 0) + 1
+            player.acc = player.acc - 1
+            -- 采集碎屑（juice）
+            local nx,ny = DESIGN_W*0.68, DESIGN_H*0.42
+            for _=1,3 do local ang=math.random()*math.pi*2; local s=30+math.random()*80
+                particles[#particles+1]={x=nx,y=ny,vx=math.cos(ang)*s,vy=math.sin(ang)*s-30,life=0.3+math.random()*0.3,max=0.6,size=2+math.random()*3,color=MAT_COLOR[a.mat]} end
+        end
+    elseif a.kind == "craft" then
+        local lvl = player.skill.fletch or 1
+        local tier = best_affordable_tier()
+        player.fletch_target = tier
+        if tier then
+            player.fletch_prog = (player.fletch_prog or 0) + FLETCH_BASE * lvl * dt
+            if player.fletch_prog >= 1 then
+                player.fletch_prog = player.fletch_prog - 1
+                craft(tier)
+            end
+        else
+            player.fletch_prog = 0
         end
     end
 end
@@ -257,10 +285,7 @@ local function set_toast(t,c) toast={text=t,color=c or UI.text,timer=2.5} end
 local function drop_loot()
     gain_xp(math.floor(enemy.level*6+10))
     player.gold = player.gold + math.floor(enemy.level*2+math.random(1,4))
-    -- 战斗只产兽筋(sinew)；木/铁/尘由挂机产线产出 → 高级箭需要两边都跟上
-    local amt = 1 + math.floor(region.level/4)
-    player.mats.sinew = (player.mats.sinew or 0) + amt
-    add_float(enemy.x, DESIGN_H*0.2, "+"..amt.." Sinew", MAT_COLOR.sinew)
+    -- 战斗给经验/金币/装备；材料靠各类挂机采集（砍柴/采矿/采药）
     if math.random() < 0.3 then
         local rid = region.rar[math.random(#region.rar)]
         local g = roll_gear(SLOTS[math.random(#SLOTS)], region.ilvl, rid)
@@ -295,21 +320,24 @@ local function enemy_attack()
 end
 
 local function update(dt)
-    t_accum=t_accum+dt; shake=math.max(0,shake-dt*40)
+    t_accum=t_accum+dt; shake=math.max(0,shake-dt*40); swing=swing+dt
     for i=#particles,1,-1 do local p=particles[i]; p.vy=p.vy+260*dt; p.x=p.x+p.vx*dt; p.y=p.y+p.vy*dt; p.life=p.life-dt; if p.life<=0 then table.remove(particles,i) end end
     for i=#floats,1,-1 do local f=floats[i]; f.y=f.y+f.vy*dt; f.vy=f.vy+40*dt; f.timer=f.timer-dt; if f.timer<=0 then table.remove(floats,i) end end
     if toast then toast.timer=toast.timer-dt; if toast.timer<=0 then toast=nil end end
-    -- 挂机产线始终运转（真·挂机：开着菜单也在产）
-    production_tick(dt)
-    recalc()  -- 让箭档显示随库存实时刷新
+
+    -- 当前挂机活动（一次只挂一种）
+    activity_tick(dt)
+    recalc()  -- 箭档显示随库存刷新
+
     if result_banner then return end
-    -- 战斗也始终运转（不再受当前界面限制）
+    -- 战斗只在「战斗挂机」时推进
+    if activity ~= "combat" then return end
+    if not enemy then next_enemy() end
     if projectile then
         projectile.x=projectile.x+(projectile.tx-projectile.x)*math.min(1,dt*18); projectile.t=projectile.t+dt*6
         if projectile.t>=1 or math.abs(projectile.x-projectile.tx)<sx(8) then resolve_hit(projectile); projectile=nil end
         return
     end
-    if not enemy then return end
     enemy.flash=math.max(0,enemy.flash-dt); enemy.hurt=math.max(0,enemy.hurt-dt)
     if enemy.phase=="enter" then
         enemy.phase_t=enemy.phase_t+dt; local k=math.min(1,enemy.phase_t/ENTER_TIME); local e=1-(1-k)*(1-k)
@@ -327,12 +355,13 @@ end
 local function init()
     player = { level=1, xp=0, xp_next=xp_need(1), base_str=5, base_agi=5, base_sta=5,
         gold=0, hp=nil, equip={}, bag={}, atb=0,
-        mats={ wood=10, iron=5, sinew=0, dust=0 }, arrows={ wood=30 },
-        lines={ wood=1, iron=1, fletch=1 }, acc={ wood=0, iron=0, dust=0, fletch=0 }, fletch_auto=true }
+        mats={ wood=8, ore=4, herb=2 }, arrows={ wood=30 },
+        skill={ woodcut=1, mining=1, herb=1, fletch=1 },
+        acc=0, fletch_prog=0, fletch_target=nil }
     player.equip.bow = roll_gear("bow", 1, "uncommon")
     recalc(); player.hp=player.max_hp
     region=REGIONS[1]; stage=0; floats={}; particles={}; projectile=nil; result_banner=nil; toast=nil
-    next_enemy()
+    activity="rest"; panel_open=nil; enemy=nil
 end
 
 -- ============================================================================
@@ -359,13 +388,30 @@ end
 local function mat_chip(m, x, y, s) setc(MAT_COLOR[m]); rrect("fill",x-s,y-s,s*2,s*2,s*0.4); love.graphics.setColor(0,0,0,0.3); rrect("line",x-s,y-s,s*2,s*2,s*0.4) end
 
 -- ============================================================================
--- 战斗场景
+-- 挂机活动场景（一次只画当前活动）
 -- ============================================================================
-local function draw_combat()
-    local px,py = sx(70), DESIGN_H*0.22*sh
+-- 弓箭手小人（可选挥动工具）
+local function draw_archer(px, py, tool, swingamt)
     love.graphics.setColor(0.85,0.7,0.55); love.graphics.circle("fill",px,py-sy(24),sx(8))
     love.graphics.setColor(0.4,0.38,0.34); love.graphics.setLineWidth(2*sw); love.graphics.line(px,py-sy(18),px,py+sy(6))
-    love.graphics.setColor(0.6,0.45,0.2); love.graphics.arc("line","open",px+sx(10),py-sy(8),sx(13),-1.1,1.1); love.graphics.setLineWidth(1)
+    love.graphics.line(px,py+sy(6),px-sx(5),py+sy(20)); love.graphics.line(px,py+sy(6),px+sx(5),py+sy(20))
+    if tool=="bow" then
+        love.graphics.setColor(0.6,0.45,0.2); love.graphics.arc("line","open",px+sx(10),py-sy(8),sx(13),-1.1,1.1)
+    elseif tool then
+        -- 挥动手臂 + 工具（斧/镐/手）
+        local ang = -0.5 + (swingamt or 0)
+        local hx,hy = px+math.cos(ang)*sx(18), py-sy(12)+math.sin(ang)*sy(18)
+        love.graphics.setColor(0.85,0.7,0.55); love.graphics.line(px,py-sy(12),hx,hy)
+        if tool=="axe" then setc({0.7,0.72,0.78}); love.graphics.setLineWidth(3*sw); love.graphics.line(hx,hy,hx+sx(8),hy-sy(4))
+        elseif tool=="pick" then setc({0.7,0.72,0.78}); love.graphics.setLineWidth(3*sw); love.graphics.line(hx-sx(6),hy-sy(5),hx+sx(6),hy+sy(2))
+        end
+    end
+    love.graphics.setLineWidth(1)
+end
+
+local function draw_combat()
+    local px,py = sx(70), DESIGN_H*0.4*sh
+    draw_archer(px,py,"bow")
     if enemy then
         local ex,ey = enemy.x*sw, py; local alpha,scl=1,1
         if enemy.phase=="dying" then local k=math.min(1,enemy.phase_t/DEATH_TIME); alpha=1-k; scl=1+k*0.4
@@ -380,10 +426,79 @@ local function draw_combat()
             bar(ex-sx(60),ey+sy(30),sx(120),sy(5),enemy.atb,{0.9,0.7,0.3})
         elseif enemy.phase=="enter" then love.graphics.setFont(font_sm); setc(UI.dim,alpha); love.graphics.printf("approaching...",ex-sx(70),ey-r-sy(28),sx(140),"center") end
     end
-    for _,p in ipairs(particles) do local a=math.max(0,p.life/p.max); love.graphics.setColor(p.color[1],p.color[2],p.color[3],a); love.graphics.rectangle("fill",p.x*sw-p.size*sw/2,p.y*sh-p.size*sh/2,p.size*sw,p.size*sh) end
     if projectile then setc(projectile.crit and UI.gold or projectile.color); love.graphics.setLineWidth(3*sw); love.graphics.line(projectile.x*sw-sx(12),projectile.y*sh,projectile.x*sw,projectile.y*sh); love.graphics.setLineWidth(1) end
-    bar(px-sx(34),py+sy(20),sx(96),sy(10),player.hp/player.max_hp,UI.good,math.floor(player.hp).."/"..player.max_hp)
-    bar(px-sx(34),py+sy(33),sx(96),sy(5),player.atb,{0.4,0.7,1.0})
+    bar(px-sx(34),py+sy(28),sx(96),sy(10),player.hp/player.max_hp,UI.good,math.floor(player.hp).."/"..player.max_hp)
+    bar(px-sx(34),py+sy(41),sx(96),sy(5),player.atb,{0.4,0.7,1.0})
+    setc(UI.dim); love.graphics.setFont(font_sm); love.graphics.printf(region.name, 0, py-sy(120), love.graphics.getWidth()-sx(10), "right")
+end
+
+-- 采集场景（砍柴/采矿/采药）
+local function draw_gather()
+    local a = ACTIVITIES[activity]
+    local px,py = sx(70), DESIGN_H*0.42*sh
+    local sw_amt = (math.sin(swing*4)*0.5+0.5)   -- 0..1 挥动
+    local tool = (activity=="woodcut" and "axe") or (activity=="mining" and "pick") or "axe"
+    draw_archer(px,py,tool,sw_amt)
+    -- 资源节点（右侧）
+    local nx,ny = DESIGN_W*0.68*sw, py
+    if activity=="woodcut" then
+        setc({0.35,0.25,0.15}); love.graphics.rectangle("fill",nx-sx(5),ny-sy(40),sx(10),sy(40))
+        setc({0.2,0.5,0.25}); love.graphics.circle("fill",nx,ny-sy(50),sx(26))
+    elseif activity=="mining" then
+        setc({0.45,0.46,0.52}); love.graphics.polygon("fill", nx-sx(26),ny, nx-sx(14),ny-sy(34), nx+sx(10),ny-sy(28), nx+sx(26),ny)
+        setc({0.7,0.72,0.78}); love.graphics.circle("fill",nx-sx(4),ny-sy(14),sx(4)); love.graphics.circle("fill",nx+sx(8),ny-sy(20),sx(3))
+    else
+        setc({0.2,0.45,0.2}); love.graphics.circle("fill",nx,ny-sy(10),sx(20))
+        setc({0.9,0.6,0.8}); love.graphics.circle("fill",nx-sx(8),ny-sy(14),sx(4)); love.graphics.circle("fill",nx+sx(7),ny-sy(8),sx(4))
+    end
+    -- 大计数
+    love.graphics.setFont(font_big); setc(MAT_COLOR[a.mat])
+    love.graphics.printf(MAT_NAME[a.mat]..": "..(player.mats[a.mat] or 0), 0, py-sy(130), love.graphics.getWidth(), "center")
+    love.graphics.setFont(font_sm); setc(UI.dim)
+    love.graphics.printf(string.format("%s  Lv %d   +%.1f/s", a.name, player.skill[activity] or 1, a.base*(player.skill[activity] or 1)), 0, py-sy(98), love.graphics.getWidth(), "center")
+end
+
+-- 制造场景
+local function draw_fletch()
+    local px,py = sx(70), DESIGN_H*0.42*sh
+    draw_archer(px,py)
+    -- 工作台
+    setc({0.4,0.3,0.2}); love.graphics.rectangle("fill", px+sx(20), py-sy(4), sx(80), sy(10), 3*sw)
+    local tier = player.fletch_target
+    love.graphics.setFont(font_big)
+    if tier then
+        setc(tier.color); love.graphics.printf("Making "..tier.name, 0, py-sy(130), love.graphics.getWidth(), "center")
+        -- 进度条
+        bar(love.graphics.getWidth()/2-sx(110), py-sy(92), sx(220), sy(16), player.fletch_prog or 0, tier.color)
+        love.graphics.setFont(font_sm); setc(UI.dim)
+        love.graphics.printf("Fletching Lv "..(player.skill.fletch or 1).."   stock: "..(player.arrows[tier.id] or 0), 0, py-sy(70), love.graphics.getWidth(), "center")
+    else
+        setc(UI.bad); love.graphics.printf("Out of materials", 0, py-sy(130), love.graphics.getWidth(), "center")
+        love.graphics.setFont(font_sm); setc(UI.dim); love.graphics.printf("Gather wood / ore / herb first", 0, py-sy(96), love.graphics.getWidth(), "center")
+    end
+end
+
+-- 休息场景
+local function draw_rest()
+    local px,py = love.graphics.getWidth()/2, DESIGN_H*0.42*sh
+    -- 篝火
+    local f = math.sin(swing*8)*0.2+0.8
+    setc({0.3,0.2,0.12}); love.graphics.rectangle("fill",px-sx(16),py,sx(32),sy(6),2*sw)
+    setc({1.0,0.5*f,0.15}); love.graphics.polygon("fill", px-sx(8),py, px,py-sy(24*f), px+sx(8),py)
+    setc({1.0,0.8,0.3,0.8}); love.graphics.polygon("fill", px-sx(4),py, px,py-sy(12*f), px+sx(4),py)
+    draw_archer(px-sx(50),py+sy(2))
+    love.graphics.setFont(font_med); setc(UI.text); love.graphics.printf("Resting", 0, py-sy(120), love.graphics.getWidth(), "center")
+    love.graphics.setFont(font_sm); setc(UI.dim); love.graphics.printf("open Activity to start an idle task", 0, py-sy(92), love.graphics.getWidth(), "center")
+end
+
+-- 主视图：按当前活动渲染 + 共享粒子
+local function draw_main()
+    local a = ACTIVITIES[activity]
+    if a.kind=="combat" then draw_combat()
+    elseif a.kind=="gather" then draw_gather()
+    elseif a.kind=="craft" then draw_fletch()
+    else draw_rest() end
+    for _,p in ipairs(particles) do local al=math.max(0,p.life/p.max); love.graphics.setColor(p.color[1],p.color[2],p.color[3],al); love.graphics.rectangle("fill",p.x*sw-p.size*sw/2,p.y*sh-p.size*sh/2,p.size*sw,p.size*sh) end
 end
 
 local function draw_hud()
@@ -405,9 +520,13 @@ end
 
 local function bottom_btns()
     local w,h=love.graphics.getWidth(),love.graphics.getHeight()
+    -- 当前活动标识
+    love.graphics.setFont(font_sm); setc(UI.dim)
+    love.graphics.printf("Activity: ", 0, h-sy(70), w, "center")
+    setc(UI.text); love.graphics.printf("                "..ACTIVITIES[activity].name, 0, h-sy(70), w, "center")
     local by=h-sy(44); local bw=(w-sx(40))/3
-    button(sx(10),by,bw,sy(34),"Regions",{0.3,0.5,0.7},true,font_sm)
-    button(sx(15)+bw,by,bw,sy(34),"Camp",{0.5,0.4,0.65},true,font_sm)
+    button(sx(10),by,bw,sy(34),"Activity",{0.5,0.4,0.65},true,font_sm)
+    button(sx(15)+bw,by,bw,sy(34),"Region",{0.3,0.5,0.7},true,font_sm)
     button(sx(20)+bw*2,by,bw,sy(34),"Gear "..#player.bag,UI.btn,true,font_sm)
 end
 
@@ -433,51 +552,40 @@ local function draw_regions()
 end
 
 -- ============================================================================
--- 营地（挂机产线 + 制作）
+-- 活动选择（挂机一次只挂一种）
 -- ============================================================================
-local function draw_camp()
+local function draw_activity()
     local w,h=love.graphics.getWidth(),love.graphics.getHeight(); love.graphics.setColor(0,0,0,0.72); love.graphics.rectangle("fill",0,0,w,h)
     local px,py,pw,ph=sx(16),sy(56),w-sx(32),h-sy(112); panel(px,py,pw,ph,{0.09,0.1,0.15,0.98},UI.line,10*sw)
-    love.graphics.setFont(font_med); setc(UI.text); love.graphics.printf("CAMP",px,py+sy(8),pw,"center")
-    love.graphics.setFont(font_sm); setc(UI.dim); love.graphics.printf("idle lines run while you play — balance them to feed your arrows",px,py+sy(30),pw,"center")
+    love.graphics.setFont(font_med); setc(UI.text); love.graphics.printf("ACTIVITY",px,py+sy(8),pw,"center")
+    love.graphics.setFont(font_sm); setc(UI.dim); love.graphics.printf("pick one idle task — it runs until you switch",px,py+sy(30),pw,"center")
 
-    -- 采集产线
-    local lx, lw = px+sx(10), pw-sx(20)
-    local function line_row(y, key, title, rate_txt)
-        panel(lx, y, lw, sy(46), {0.11,0.12,0.17,0.95}, UI.line, 6*sw)
-        setc(UI.text); love.graphics.setFont(font); love.graphics.print(title.."  Lv "..player.lines[key], lx+sx(12), y+sy(6))
-        setc(UI.dim); love.graphics.setFont(font_sm); love.graphics.print(rate_txt, lx+sx(12), y+sy(26))
-        local c = line_cost(player.lines[key]); local ok = player.gold>=c
-        button(lx+lw-sx(96), y+sy(8), sx(86), sy(30), "Up  "..c.."g", ok and {0.3,0.6,0.5} or UI.btn, ok, font_sm)
-    end
-    local gy = py+sy(50)
-    line_row(gy,        "wood", "Woodcutting", string.format("+%.1f wood/s", WOOD_RATE*player.lines.wood))
-    line_row(gy+sy(54), "iron", "Mining",      string.format("+%.1f iron/s  +%.2f dust/s", IRON_RATE*player.lines.iron, DUST_RATE*player.lines.iron))
-    line_row(gy+sy(108),"fletch","Fletching",  string.format("auto-crafts best arrow ~%.1f/s", FLETCH_RATE*player.lines.fletch))
-    -- 自动开关
-    setc(player.fletch_auto and UI.good or UI.dim); love.graphics.setFont(font_sm)
-    button(lx, gy+sy(150), sx(120), sy(26), player.fletch_auto and "Auto: ON" or "Auto: OFF", player.fletch_auto and {0.3,0.6,0.4} or {0.4,0.3,0.3}, true, font_sm)
-    setc(UI.dim); love.graphics.print("(combat drops Sinew)", lx+sx(132), gy+sy(154))
-
-    -- 手动制作四档（紧凑）
-    local cy = gy+sy(186)
-    setc(UI.dim); love.graphics.setFont(font_sm); love.graphics.print("Manual fletch:", lx, cy-sy(2))
-    for i,tier in ipairs(ARROW_TIERS) do
-        local y=cy+sy(16)+(i-1)*sy(38)
-        panel(lx, y, lw, sy(34), {tier.color[1]*0.15,tier.color[2]*0.15,tier.color[3]*0.18,0.95}, {tier.color[1]*0.6,tier.color[2]*0.6,tier.color[3]*0.6}, 5*sw)
-        setc(tier.color); love.graphics.rectangle("fill",lx,y,4*sw,sy(34),2*sw,2*sw)
-        setc(tier.color); love.graphics.setFont(font_sm); love.graphics.print(tier.name, lx+sx(12), y+sy(3))
-        setc(UI.dim); love.graphics.print(string.format("x%.1f  have %d", tier.mult, player.arrows[tier.id] or 0), lx+sx(12), y+sy(18))
-        -- cost chips
-        local ccx=lx+sx(150); for m,n in pairs(tier.cost) do mat_chip(m,ccx+sx(5),y+sy(17),sx(5)); setc((player.mats[m] or 0)>=n and UI.text or UI.bad); love.graphics.print("x"..n, ccx+sx(13), y+sy(10)); ccx=ccx+sx(46) end
-        local ok=can_craft(tier)
-        button(lx+lw-sx(70), y+sy(5), sx(62), sy(24), "+"..ARROW_BATCH, ok and {0.3,0.7,0.4} or UI.btn, ok, font_sm)
+    local ry=py+sy(54); local rh=sy(56)
+    for i,id in ipairs(ACT_ORDER) do
+        local a=ACTIVITIES[id]; local y=ry+(i-1)*(rh+sy(6)); local cur=(activity==id)
+        panel(px+sx(10),y,pw-sx(20),rh, cur and {0.15,0.2,0.3,0.97} or {0.11,0.12,0.17,0.95}, cur and UI.btn or UI.line, 8*sw)
+        setc(UI.text); love.graphics.setFont(font); love.graphics.print(a.name, px+sx(22), y+sy(7))
+        love.graphics.setFont(font_sm); setc(UI.dim)
+        if a.kind=="gather" then
+            love.graphics.print(string.format("Lv %d   produces %s  +%.1f/s", player.skill[id] or 1, MAT_NAME[a.mat], a.base*(player.skill[id] or 1)), px+sx(22), y+sy(30))
+            local c=skill_cost(player.skill[id] or 1); local ok=player.gold>=c
+            button(px+pw-sx(96), y+sy(13), sx(86), sy(30), "Up "..c.."g", ok and {0.3,0.6,0.5} or UI.btn, ok, font_sm)
+        elseif a.kind=="craft" then
+            love.graphics.print(string.format("Lv %d   crafts best arrow you can afford", player.skill.fletch or 1), px+sx(22), y+sy(30))
+            local c=skill_cost(player.skill.fletch or 1); local ok=player.gold>=c
+            button(px+pw-sx(96), y+sy(13), sx(86), sy(30), "Up "..c.."g", ok and {0.3,0.6,0.5} or UI.btn, ok, font_sm)
+        elseif a.kind=="combat" then
+            love.graphics.print("fight in "..region.name.."  (uses arrows)", px+sx(22), y+sy(30))
+        else
+            love.graphics.print("do nothing", px+sx(22), y+sy(30))
+        end
+        if cur then setc(UI.good); love.graphics.setFont(font_sm); love.graphics.printf("ACTIVE",px+sx(10),y+sy(7),pw-sx(40),"right") end
     end
 
     -- 材料栏
     local my=py+ph-sy(56); love.graphics.setColor(0.06,0.07,0.11,0.9); rrect("fill",px+sx(6),my-sy(4),pw-sx(12),sy(24),5*sw)
     local mw=(pw-sx(12))/#MATERIALS
-    for i,m in ipairs(MATERIALS) do local mx=px+sx(6)+(i-1)*mw; mat_chip(m,mx+sx(16),my+sy(8),sx(6)); setc(UI.text); love.graphics.setFont(font_sm); love.graphics.print((MAT_NAME[m])..": "..(player.mats[m] or 0), mx+sx(26),my+sy(2)) end
+    for i,m in ipairs(MATERIALS) do local mx=px+sx(6)+(i-1)*mw; mat_chip(m,mx+sx(16),my+sy(8),sx(6)); setc(UI.text); love.graphics.setFont(font_sm); love.graphics.print(MAT_NAME[m]..": "..(player.mats[m] or 0), mx+sx(26),my+sy(2)) end
     button(px+pw/2-sx(60),py+ph-sy(32),sx(120),sy(26),"Back",{0.4,0.4,0.5},true)
 end
 
@@ -650,9 +758,9 @@ function love.draw()
     love.graphics.setBackgroundColor(UI.bg)
     local ox,oy=0,0; if shake>0 then ox=(math.random()*2-1)*shake; oy=(math.random()*2-1)*shake end
     love.graphics.push(); love.graphics.translate(ox,oy)
-    draw_combat(); draw_hud(); if screen=="combat" then bottom_btns() end
+    draw_main(); draw_hud(); if not panel_open then bottom_btns() end
     for _,f in ipairs(floats) do love.graphics.setFont(f.scale>1.2 and font_med or font_sm); love.graphics.setColor(f.color[1],f.color[2],f.color[3],math.min(1,f.timer*2)); love.graphics.printf(f.text,f.x*sw-sx(60),f.y*sh,sx(120),"center") end
-    if screen=="regions" then draw_regions() elseif screen=="camp" then draw_camp() elseif screen=="gear" then draw_gear(); draw_tooltip() end
+    if panel_open=="region" then draw_regions() elseif panel_open=="activity" then draw_activity() elseif panel_open=="gear" then draw_gear(); draw_tooltip() end
     if result_banner=="defeat" then
         love.graphics.setColor(0,0,0,0.7); love.graphics.rectangle("fill",0,0,love.graphics.getWidth(),love.graphics.getHeight())
         love.graphics.setFont(font_big); setc(UI.bad); love.graphics.printf("DEFEATED",0,love.graphics.getHeight()*0.4,love.graphics.getWidth(),"center")
@@ -663,36 +771,40 @@ end
 
 local function hit(x,y,rx,ry,rw,rh) return x>=rx and x<=rx+rw and y>=ry and y<=ry+rh end
 local function press(x,y)
-    if result_banner=="defeat" then player.hp=player.max_hp; result_banner=nil; next_enemy(); return end
+    if result_banner=="defeat" then player.hp=player.max_hp; result_banner=nil; activity="rest"; enemy=nil; return end
     local w,h=love.graphics.getWidth(),love.graphics.getHeight()
-    if screen=="combat" then
+    if not panel_open then
+        -- 底部三按钮：Activity / Region / Gear
         local by=h-sy(44); local bw=(w-sx(40))/3
-        if hit(x,y,sx(10),by,bw,sy(34)) then screen="regions"; return end
-        if hit(x,y,sx(15)+bw,by,bw,sy(34)) then screen="camp"; return end
-        if hit(x,y,sx(20)+bw*2,by,bw,sy(34)) then screen="gear"; gear_tab="doll"; return end
-    elseif screen=="regions" then
+        if hit(x,y,sx(10),by,bw,sy(34)) then panel_open="activity"; return end
+        if hit(x,y,sx(15)+bw,by,bw,sy(34)) then panel_open="region"; return end
+        if hit(x,y,sx(20)+bw*2,by,bw,sy(34)) then panel_open="gear"; gear_tab="doll"; return end
+    elseif panel_open=="region" then
         local px,py,pw,ph=sx(16),sy(56),w-sx(32),h-sy(112); local ry=py+sy(52); local rh=sy(72)
-        for i,rg in ipairs(REGIONS) do local y=ry+(i-1)*(rh+sy(8)); if hit(x,y,px+sx(10),y,pw-sx(20),rh) then region=rg; stage=0; next_enemy(); screen="combat"; set_toast("Now hunting "..rg.name,UI.good); return end end
-        if hit(x,y,px+pw/2-sx(64),py+ph-sy(40),sx(128),sy(30)) then screen="combat"; return end
-    elseif screen=="camp" then
-        local px,py,pw,ph=sx(16),sy(56),w-sx(32),h-sy(112)
-        local lx,lw=px+sx(10),pw-sx(20); local gy=py+sy(50)
-        -- 三条产线升级按钮
-        if hit(x,y,lx+lw-sx(96),gy+sy(8),sx(86),sy(30)) then upgrade_line("wood"); return end
-        if hit(x,y,lx+lw-sx(96),gy+sy(54)+sy(8),sx(86),sy(30)) then upgrade_line("iron"); return end
-        if hit(x,y,lx+lw-sx(96),gy+sy(108)+sy(8),sx(86),sy(30)) then upgrade_line("fletch"); return end
-        -- 自动开关
-        if hit(x,y,lx,gy+sy(150),sx(120),sy(26)) then player.fletch_auto = not player.fletch_auto; return end
-        -- 手动制作四档
-        local cy=gy+sy(186)
-        for i,tier in ipairs(ARROW_TIERS) do local y=cy+sy(16)+(i-1)*sy(38); if hit(x,y,lx+lw-sx(70),y+sy(5),sx(62),sy(24)) then craft(tier); return end end
-        if hit(x,y,px+pw/2-sx(60),py+ph-sy(32),sx(120),sy(26)) then screen="combat"; return end
-    elseif screen=="gear" then
+        for i,rg in ipairs(REGIONS) do local y=ry+(i-1)*(rh+sy(8)); if hit(x,y,px+sx(10),y,pw-sx(20),rh) then region=rg; stage=0; enemy=nil; set_toast("Hunting ground: "..rg.name,UI.good); return end end
+        if hit(x,y,px+pw/2-sx(64),py+ph-sy(40),sx(128),sy(30)) then panel_open=nil; return end
+    elseif panel_open=="activity" then
+        local px,py,pw,ph=sx(16),sy(56),w-sx(32),h-sy(112); local ry=py+sy(54); local rh=sy(56)
+        for i,id in ipairs(ACT_ORDER) do
+            local a=ACTIVITIES[id]; local y=ry+(i-1)*(rh+sy(6))
+            -- 升级按钮（gather/craft）
+            if (a.kind=="gather" or a.kind=="craft") and hit(x,y,px+pw-sx(96),y+sy(13),sx(86),sy(30)) then
+                upgrade_skill(a.kind=="craft" and "fletch" or id); return
+            end
+            -- 选中该活动（点行其余区域）
+            if hit(x,y,px+sx(10),y,pw-sx(20),rh) then
+                activity=id; player.acc=0; player.fletch_prog=0
+                if id=="combat" and not enemy then next_enemy() end
+                panel_open=nil; return
+            end
+        end
+        if hit(x,y,px+pw/2-sx(60),py+ph-sy(32),sx(120),sy(26)) then panel_open=nil; return end
+    elseif panel_open=="gear" then
         if tooltip then tooltip_press(x,y); return end
         local px,py,pw,ph=sx(16),sy(56),w-sx(32),h-sy(112)
         local tw=(pw-sx(20))/2
         for i,t in ipairs({"doll","bag"}) do if hit(x,y,px+sx(10)+(i-1)*tw,py+sy(30),tw,sy(24)) then gear_tab=t; return end end
-        if hit(x,y,px+pw/2-sx(64),py+ph-sy(34),sx(128),sy(28)) then screen="combat"; return end
+        if hit(x,y,px+pw/2-sx(64),py+ph-sy(34),sx(128),sy(28)) then panel_open=nil; return end
         if gear_tab=="doll" then
             -- 点装备槽 → 弹详情
             local cy=py+sy(58); local ly=cy+sy(54); local rh=sy(38)
