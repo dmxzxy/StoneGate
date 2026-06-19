@@ -503,31 +503,29 @@ end
 
 local function draw_hud()
     local w=love.graphics.getWidth()
-    love.graphics.setColor(0.05,0.06,0.1,0.92); love.graphics.rectangle("fill",0,0,w,sy(72))
-    love.graphics.setColor(UI.btn[1],UI.btn[2],UI.btn[3],0.5); love.graphics.rectangle("fill",0,sy(72)-2*sh,w,2*sh)
+    local bh=sy(50)
+    love.graphics.setColor(0.05,0.06,0.1,0.94); love.graphics.rectangle("fill",0,0,w,bh)
+    love.graphics.setColor(UI.btn[1],UI.btn[2],UI.btn[3],0.5); love.graphics.rectangle("fill",0,bh-2*sh,w,2*sh)
+    -- 左：等级 + 经验条
     love.graphics.setFont(font_med); setc(UI.text); love.graphics.print("Lv "..player.level, sx(10), sy(5))
-    love.graphics.setFont(font_sm); setc(UI.dim); love.graphics.print(region.name, sx(10), sy(28))
-    bar(sx(72),sy(11),sx(150),sy(10),player.xp/player.xp_next,UI.xp,math.floor(player.xp).."/"..player.xp_next)
-    love.graphics.setFont(font_sm); local cx=sx(235)
-    for _,k in ipairs(ATTRS) do setc(ATTR_COLOR[k]); love.graphics.print(ATTR_NAME[k],cx,sy(6)); setc(UI.text); love.graphics.print(player[k],cx,sy(20)); cx=cx+sx(42) end
-    setc(UI.gold); love.graphics.print("G "..player.gold, sx(235), sy(40))
-    -- 当前箭档 + 数量
-    local atxt = player.arrow_tier and (player.arrow_tier.name.." x"..(player.arrows[player.arrow_tier.id] or 0)) or "No Arrows (0.5x)"
-    setc(player.arrow_tier and player.arrow_tier.color or UI.bad); love.graphics.print(atxt, sx(10), sy(45))
-    setc(UI.dim); love.graphics.print(string.format("ATK %d  AS %.2f  Crit %d%%  DPS %d", math.floor(player.attack), player.atk_speed, math.floor(player.crit*100), math.floor(player.dps)), sx(10), sy(58))
-    if toast then love.graphics.setFont(font_sm); setc(toast.color,math.min(1,toast.timer)); love.graphics.printf(toast.text,0,sy(76),w-sx(8),"right") end
+    bar(sx(10), sy(32), sx(140), sy(9), player.xp/player.xp_next, UI.xp, math.floor(player.xp).."/"..player.xp_next)
+    -- 右上：金币
+    love.graphics.setFont(font_sm); setc(UI.gold); love.graphics.printf("Gold "..player.gold, 0, sy(7), w-sx(10), "right")
+    -- 右下：当前箭档
+    local atxt = player.arrow_tier and (player.arrow_tier.name.." x"..(player.arrows[player.arrow_tier.id] or 0)) or "No Arrows"
+    setc(player.arrow_tier and player.arrow_tier.color or UI.bad); love.graphics.printf(atxt, 0, sy(28), w-sx(10), "right")
+    if toast then love.graphics.setFont(font_sm); setc(toast.color,math.min(1,toast.timer)); love.graphics.printf(toast.text,0,sy(54),w-sx(10),"right") end
 end
 
 local function bottom_btns()
     local w,h=love.graphics.getWidth(),love.graphics.getHeight()
-    -- 当前活动标识
-    love.graphics.setFont(font_sm); setc(UI.dim)
-    love.graphics.printf("Activity: ", 0, h-sy(70), w, "center")
-    setc(UI.text); love.graphics.printf("                "..ACTIVITIES[activity].name, 0, h-sy(70), w, "center")
-    local by=h-sy(44); local bw=(w-sx(40))/3
-    button(sx(10),by,bw,sy(34),"Activity",{0.5,0.4,0.65},true,font_sm)
-    button(sx(15)+bw,by,bw,sy(34),"Region",{0.3,0.5,0.7},true,font_sm)
-    button(sx(20)+bw*2,by,bw,sy(34),"Gear "..#player.bag,UI.btn,true,font_sm)
+    -- 当前活动标识（居中单行）
+    love.graphics.setFont(font_sm); setc(ACTIVITIES[activity].name=="Rest" and UI.dim or UI.good)
+    love.graphics.printf("Now: "..ACTIVITIES[activity].name, 0, h-sy(68), w, "center")
+    local by=h-sy(46); local bw=(w-sx(40))/3
+    button(sx(10),by,bw,sy(36),"Activity",{0.5,0.4,0.65},true,font_sm)
+    button(sx(15)+bw,by,bw,sy(36),"Region",{0.3,0.5,0.7},true,font_sm)
+    button(sx(20)+bw*2,by,bw,sy(36),"Gear "..#player.bag,UI.btn,true,font_sm)
 end
 
 -- ============================================================================
@@ -781,18 +779,18 @@ local function press(x,y)
         if hit(x,y,sx(20)+bw*2,by,bw,sy(34)) then panel_open="gear"; gear_tab="doll"; return end
     elseif panel_open=="region" then
         local px,py,pw,ph=sx(16),sy(56),w-sx(32),h-sy(112); local ry=py+sy(52); local rh=sy(72)
-        for i,rg in ipairs(REGIONS) do local y=ry+(i-1)*(rh+sy(8)); if hit(x,y,px+sx(10),y,pw-sx(20),rh) then region=rg; stage=0; enemy=nil; set_toast("Hunting ground: "..rg.name,UI.good); return end end
+        for i,rg in ipairs(REGIONS) do local yy=ry+(i-1)*(rh+sy(8)); if hit(x,y,px+sx(10),yy,pw-sx(20),rh) then region=rg; stage=0; enemy=nil; set_toast("Hunting ground: "..rg.name,UI.good); return end end
         if hit(x,y,px+pw/2-sx(64),py+ph-sy(40),sx(128),sy(30)) then panel_open=nil; return end
     elseif panel_open=="activity" then
         local px,py,pw,ph=sx(16),sy(56),w-sx(32),h-sy(112); local ry=py+sy(54); local rh=sy(56)
         for i,id in ipairs(ACT_ORDER) do
-            local a=ACTIVITIES[id]; local y=ry+(i-1)*(rh+sy(6))
+            local a=ACTIVITIES[id]; local yy=ry+(i-1)*(rh+sy(6))
             -- 升级按钮（gather/craft）
-            if (a.kind=="gather" or a.kind=="craft") and hit(x,y,px+pw-sx(96),y+sy(13),sx(86),sy(30)) then
+            if (a.kind=="gather" or a.kind=="craft") and hit(x,y,px+pw-sx(96),yy+sy(13),sx(86),sy(30)) then
                 upgrade_skill(a.kind=="craft" and "fletch" or id); return
             end
             -- 选中该活动（点行其余区域）
-            if hit(x,y,px+sx(10),y,pw-sx(20),rh) then
+            if hit(x,y,px+sx(10),yy,pw-sx(20),rh) then
                 activity=id; player.acc=0; player.fletch_prog=0
                 if id=="combat" and not enemy then next_enemy() end
                 panel_open=nil; return
@@ -809,14 +807,14 @@ local function press(x,y)
             -- 点装备槽 → 弹详情
             local cy=py+sy(58); local ly=cy+sy(54); local rh=sy(38)
             for i,slot in ipairs(SLOTS) do
-                local y=ly+(i-1)*(rh+sy(3)); local g=player.equip[slot]
-                if g and hit(x,y,px+sx(10),y,pw-sx(20),rh) then tooltip={ g=g, src="equip" }; return end
+                local yy=ly+(i-1)*(rh+sy(3)); local g=player.equip[slot]
+                if g and hit(x,y,px+sx(10),yy,pw-sx(20),rh) then tooltip={ g=g, src="equip" }; return end
             end
         else
             -- 点背包物品 → 弹详情(内含 Equip)
             local ly=py+sy(60); local cardh=sy(44)
-            for i,g in ipairs(player.bag) do local y=ly+(i-1)*(cardh+sy(5)); if y+cardh>py+ph-sy(46) then break end
-                if hit(x,y,px+sx(10),y,pw-sx(20),cardh) then tooltip={ g=g, src="bag", idx=i }; return end end
+            for i,g in ipairs(player.bag) do local yy=ly+(i-1)*(cardh+sy(5)); if yy+cardh>py+ph-sy(46) then break end
+                if hit(x,y,px+sx(10),yy,pw-sx(20),cardh) then tooltip={ g=g, src="bag", idx=i }; return end end
         end
     end
 end
