@@ -418,45 +418,90 @@ end
 -- ============================================================================
 -- 挂机活动场景（一次只画当前活动）
 -- ============================================================================
--- 粗肢端点圆角
-local function limb(x1,y1,x2,y2,wd)
-    love.graphics.setLineWidth(wd); love.graphics.line(x1,y1,x2,y2)
-    love.graphics.circle("fill",x1,y1,wd/2); love.graphics.circle("fill",x2,y2,wd/2)
+-- 圆角胶囊肢段：两端圆头，端点画关节圆。
+local function seg(x1,y1,x2,y2,wd)
+    love.graphics.setLineWidth(wd)
+    love.graphics.line(x1,y1,x2,y2)
+    love.graphics.circle("fill",x1,y1,wd*0.5)
+    love.graphics.circle("fill",x2,y2,wd*0.5)
 end
--- 火柴人：圆头 + 粗躯干/四肢 + 待机浮动。pose: idle|bow|chop
+-- 两段肢（带中间关节）：从 (ax,ay) 经关节到末端，bend 控制弯曲方向/量。
+-- 用余弦定理给定两段长 l1,l2 求关节点，jt 是关节横向偏移系数。
+local function limb2(ax,ay,bx,by,l1,l2,bend,wd)
+    local dx,dy = bx-ax, by-ay
+    local d = math.max(0.001, math.sqrt(dx*dx+dy*dy))
+    d = math.min(d, l1+l2-0.001)
+    -- 关节点：在 a-b 连线中点偏移
+    local a1 = (d*d + l1*l1 - l2*l2)/(2*d)
+    local h = math.sqrt(math.max(0, l1*l1 - a1*a1)) * bend
+    local ux,uy = dx/d, dy/d
+    local nx,ny = -uy, ux
+    local jx = ax + ux*a1 + nx*h
+    local jy = ay + uy*a1 + ny*h
+    seg(ax,ay,jx,jy,wd)
+    seg(jx,jy,bx,by,wd)
+    return jx,jy
+end
+
+-- 火柴人（参考 SVG 骨架画法：分段四肢 + 关节圆 + 圆角胶囊 + 抗锯齿）
+-- 比例：头半径 R，躯干≈3.4R，腿≈4R(两段)，臂≈3.2R(两段)。pose: idle|bow|chop
 local function draw_archer(px, py, pose, phase)
     pose = pose or "idle"
-    py = py + math.sin((phase or t_accum)*2)*sy(2)   -- 待机微浮动
-    local skin={0.88,0.74,0.58}; local body={0.5,0.53,0.62}
-    local lw=sx(4.5)
-    local hipY,shY,headY = py-sy(28), py-sy(50), py-sy(63)
-    -- 腿
-    setc(body); limb(px,hipY,px-sx(8),py,lw); limb(px,hipY,px+sx(8),py,lw)
-    -- 躯干
-    limb(px,hipY,px,shY,lw+sx(1.5))
-    -- 头
-    setc(skin); love.graphics.circle("fill",px,headY,sx(10))
-    -- 手臂 + 持物
+    local breathe = math.sin((phase or t_accum)*2)*sy(1.5)
+    py = py + breathe
+    local skin={0.9,0.76,0.6}; local body={0.46,0.5,0.62}; local dark={0.32,0.35,0.45}
+    local R = sx(9)                         -- 头半径，作为比例基准
+    local lw = R*0.78                        -- 肢宽（胶囊直径）
+    local footY = py
+    local hipY  = py - R*4.0                  -- 腿长 ~4R（两段）
+    local shY   = hipY - R*3.0                -- 躯干 ~3R
+    local headY = shY - R*1.35
+
+    love.graphics.push("all")
+    love.graphics.setLineStyle("smooth")     -- 抗锯齿线
+
+    -- 腿（两段，带膝；微微分开站立）
+    setc(dark)
+    limb2(px-sx(1), hipY, px-sx(9), footY, R*2.1, R*2.1, 1, lw)
+    limb2(px+sx(1), hipY, px+sx(9), footY, R*2.1, R*2.1, 1, lw)
+    -- 躯干（略带锥度：用两段近似，肩稍宽）
+    setc(body); seg(px, hipY, px, shY, lw*1.15)
+    -- 肩
+    love.graphics.circle("fill", px, shY, lw*0.62)
+
+    -- 手臂
     setc(skin)
     if pose=="bow" then
-        local fx,fy = px+sx(22), shY+sy(2)
-        limb(px,shY,fx,fy,lw)                          -- 持弓前手
-        limb(px,shY,px+sx(8),shY+sy(9),lw)             -- 拉弦手
-        setc({0.62,0.46,0.22}); love.graphics.setLineWidth(sx(2.6)); love.graphics.arc("line","open",fx,fy,sx(15),-1.2,1.2)
-        setc({0.88,0.86,0.78}); love.graphics.setLineWidth(sx(1.2))
-        love.graphics.line(fx+sx(15)*math.cos(-1.2),fy+sx(15)*math.sin(-1.2), px+sx(8),shY+sy(9), fx+sx(15)*math.cos(1.2),fy+sx(15)*math.sin(1.2))
-        love.graphics.setLineWidth(1)
+        -- 前手平举持弓，后手拉弦到下巴
+        local fx,fy = px+sx(26), shY-sy(1)
+        local bx2,by2 = px+sx(6), shY+sy(7)
+        limb2(px,shY, fx,fy, R*1.7, R*1.7, -1, lw*0.92)
+        limb2(px,shY, bx2,by2, R*1.6, R*1.6, 1, lw*0.92)
+        -- 弓
+        setc({0.62,0.46,0.22}); love.graphics.setLineWidth(sx(2.8))
+        love.graphics.arc("line","open",fx,fy,sx(16),-1.25,1.25)
+        setc({0.9,0.88,0.8}); love.graphics.setLineWidth(sx(1.2))
+        love.graphics.line(fx+sx(16)*math.cos(-1.25),fy+sx(16)*math.sin(-1.25), bx2,by2, fx+sx(16)*math.cos(1.25),fy+sx(16)*math.sin(1.25))
     elseif pose=="chop" then
-        local amt=math.sin(phase or 0)*0.5+0.5; local ang=-1.2+amt*1.3
-        local hx,hy = px+math.cos(ang)*sx(22), shY+sy(2)+math.sin(ang)*sy(22)
-        limb(px,shY,hx,hy,lw)
-        local tx,ty = hx+math.cos(ang)*sx(15), hy+math.sin(ang)*sx(15)
-        setc({0.45,0.32,0.2}); love.graphics.setLineWidth(sx(2.8)); love.graphics.line(hx,hy,tx,ty)
-        setc({0.78,0.8,0.86}); love.graphics.circle("fill",tx,ty,sx(5)); love.graphics.setLineWidth(1)
+        local amt=math.sin(phase or 0)*0.5+0.5; local ang=-1.15+amt*1.25
+        local hx,hy = px+math.cos(ang)*R*3.0, shY+math.sin(ang)*R*3.0
+        limb2(px,shY, hx,hy, R*1.7, R*1.7, -1, lw*0.92)
+        -- 工具：柄+头
+        local tx,ty = hx+math.cos(ang)*sx(16), hy+math.sin(ang)*sx(16)
+        setc({0.45,0.32,0.2}); love.graphics.setLineWidth(sx(3)); love.graphics.line(hx,hy,tx,ty)
+        setc({0.78,0.8,0.86}); love.graphics.circle("fill",tx,ty,sx(5))
+        -- 另一只手扶着
+        limb2(px,shY, px+sx(10),shY+sy(10), R*1.5,R*1.5, 1, lw*0.92)
     else
-        limb(px,shY,px-sx(11),shY+sy(15),lw); limb(px,shY,px+sx(11),shY+sy(15),lw)
+        limb2(px,shY, px-sx(10),shY+R*2.4, R*1.6,R*1.6, 1, lw*0.92)
+        limb2(px,shY, px+sx(10),shY+R*2.4, R*1.6,R*1.6, -1, lw*0.92)
     end
-    love.graphics.setLineWidth(1)
+
+    -- 头（带轮廓圈，更利落）
+    setc(skin); love.graphics.circle("fill", px, headY, R)
+    setc(dark); love.graphics.setLineWidth(sx(1.4)); love.graphics.circle("line", px, headY, R)
+
+    love.graphics.pop()
 end
 
 -- 进度圆环（替代部分文字进度）
