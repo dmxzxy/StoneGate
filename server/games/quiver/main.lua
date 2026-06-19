@@ -30,10 +30,12 @@ local ARMOR_K = 160
 -- 数据
 -- ============================================================================
 local RARITIES = {
-    { id="uncommon",  name="优秀",  mult=1.0, affixes=1, color={0.4,0.85,0.4},  src="field"   },
-    { id="rare",      name="精良",  mult=1.6, affixes=2, color={0.35,0.6,1.0},  src="field"   },
-    { id="epic",      name="史诗",  mult=2.6, affixes=3, color={0.75,0.4,1.0},  src="dungeon" },
-    { id="legendary", name="传说",  mult=4.0, affixes=4, color={1.0,0.62,0.15}, src="dungeon" },
+    { id="poor",      name="粗糙",  mult=0.6, affixes=0, color={0.6,0.6,0.62},   src="field"   },
+    { id="common",    name="普通",  mult=0.8, affixes=0, color={0.92,0.92,0.95}, src="field"   },
+    { id="uncommon",  name="优秀",  mult=1.0, affixes=1, color={0.4,0.85,0.4},   src="field"   },
+    { id="rare",      name="精良",  mult=1.6, affixes=2, color={0.35,0.6,1.0},   src="field"   },
+    { id="epic",      name="史诗",  mult=2.6, affixes=3, color={0.75,0.4,1.0},   src="dungeon" },
+    { id="legendary", name="传说",  mult=4.0, affixes=4, color={1.0,0.62,0.15},  src="dungeon" },
 }
 local RAR = {}; for i,r in ipairs(RARITIES) do RAR[r.id]=r; r.tier=i end
 
@@ -95,10 +97,10 @@ local ACT_ORDER = { "rest", "woodcut", "mining", "herb", "fletch", "combat" }
 local FLETCH_BASE = 0.25   -- 每秒每级的「制作进度」(满 1 出一批)
 
 local REGIONS = {
-    { id="meadow", name="绿野",     level=1,  ilvl=3,  rar={"uncommon","uncommon","rare"}, enemies={"boar","wolf"} },
-    { id="forest", name="幽暗森林", level=6,  ilvl=10, rar={"uncommon","rare","rare"},     enemies={"wolf","bandit","ogre"} },
-    { id="ruins",  name="沉没遗迹", level=14, ilvl=20, rar={"rare","rare","epic"},         enemies={"bandit","ogre","wraith"} },
-    { id="peak",   name="霜寒峰",   level=24, ilvl=32, rar={"rare","epic","epic"},         enemies={"ogre","wraith","golem"} },
+    { id="meadow", name="绿野",     level=1,  ilvl=3,  rar={"poor","common","common","uncommon"}, enemies={"boar","wolf"} },
+    { id="forest", name="幽暗森林", level=6,  ilvl=10, rar={"common","uncommon","uncommon","rare"}, enemies={"wolf","bandit","ogre"} },
+    { id="ruins",  name="沉没遗迹", level=14, ilvl=20, rar={"uncommon","rare","rare","epic"},        enemies={"bandit","ogre","wraith"} },
+    { id="peak",   name="霜寒峰",   level=24, ilvl=32, rar={"rare","rare","epic","epic"},           enemies={"ogre","wraith","golem"} },
 }
 local ENEMY_ARCH = {
     boar  ={ name="野猪",   hp=1.0, dmg=1.0, armor=0.3, spd=0.55, color={0.6,0.45,0.35} },
@@ -138,6 +140,7 @@ local function sy(v) return v*sh end
 -- player.inv = 定长格子数组（nil 或 item）
 -- ============================================================================
 local BAG_SLOTS = 24
+local function max_stack(kind) return (kind=="arrow") and 200 or 9999 end  -- 箭矢 200/堆
 local function inv_count(kind,id)
     local n=0; for i=1,BAG_SLOTS do local it=player.inv[i]; if it and it.kind==kind and it.id==id then n=n+it.qty end end; return n
 end
@@ -146,22 +149,27 @@ local function inv_add(kind,id,qty,gear)
         for i=1,BAG_SLOTS do if not player.inv[i] then player.inv[i]={kind="gear",gear=gear,qty=1}; return true end end
         return false
     end
-    for i=1,BAG_SLOTS do local it=player.inv[i]; if it and it.kind==kind and it.id==id then it.qty=it.qty+qty; return true end end
-    for i=1,BAG_SLOTS do if not player.inv[i] then player.inv[i]={kind=kind,id=id,qty=qty}; return true end end
-    return false
+    local ms=max_stack(kind)
+    -- 先填已有未满的堆
+    for i=1,BAG_SLOTS do local it=player.inv[i]; if it and it.kind==kind and it.id==id and it.qty<ms then
+        local put=math.min(ms-it.qty,qty); it.qty=it.qty+put; qty=qty-put; if qty<=0 then return true end end end
+    -- 再开新格（超过 200 自动分堆）
+    for i=1,BAG_SLOTS do if not player.inv[i] then
+        local put=math.min(ms,qty); player.inv[i]={kind=kind,id=id,qty=put}; qty=qty-put; if qty<=0 then return true end end end
+    return qty<=0
 end
 local function inv_remove(kind,id,n)
     for i=1,BAG_SLOTS do local it=player.inv[i]; if it and it.kind==kind and it.id==id then
         local take=math.min(n,it.qty); it.qty=it.qty-take; n=n-take; if it.qty<=0 then player.inv[i]=nil end
         if n<=0 then break end end end
 end
--- 交换/移动/堆叠两个格子（拖拽用）
+-- 交换/移动/堆叠两个格子（拖拽用），堆叠尊重上限
 local function inv_swap(a,b)
     if a==b then return end
     local ia,ib = player.inv[a], player.inv[b]
-    -- 同类可堆叠 → 合并
     if ia and ib and ia.kind==ib.kind and ia.id==ib.id and ia.kind~="gear" then
-        ib.qty=ib.qty+ia.qty; player.inv[a]=nil; return
+        local ms=max_stack(ia.kind); local mv=math.min(ms-ib.qty, ia.qty)
+        if mv>0 then ib.qty=ib.qty+mv; ia.qty=ia.qty-mv; if ia.qty<=0 then player.inv[a]=nil end; return end
     end
     player.inv[a], player.inv[b] = ib, ia
 end
@@ -416,7 +424,9 @@ local function init()
         acc=0, fletch_prog=0, fletch_target=nil, fletch_blueprint="wood" }
     -- 初始物品入格
     inv_add("mat","wood",8); inv_add("mat","ore",4); inv_add("mat","herb",2); inv_add("arrow","wood",30)
-    player.equip.bow = roll_gear("bow", 1, "uncommon")
+    -- 初始装备：灰色弓 + 普通(白)箭袋
+    player.equip.bow = roll_gear("bow", 1, "poor")
+    player.equip.quiver = roll_gear("quiver", 1, "common")
     recalc(); player.hp=player.max_hp
     region=REGIONS[1]; stage=0; floats={}; particles={}; projectile=nil; result_banner=nil; toast=nil
     activity="rest"; panel_open=nil; enemy=nil
