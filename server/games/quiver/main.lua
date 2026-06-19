@@ -919,13 +919,19 @@ local function draw_item_icon(it, cx, cy, s)
 end
 
 -- 背包网格几何（draw 与 press/drag 共用）
-local BAG_COLS = 4
+local BAG_COLS = 6
 local function bag_grid()
     local w,h=love.graphics.getWidth(),love.graphics.getHeight()
     local px,py,pw,ph=sx(16),sy(56),w-sx(32),h-sy(112)
-    local gap=sx(8); local cell=(pw-sx(20)-gap*(BAG_COLS-1))/BAG_COLS
-    local gx,gy=px+sx(10), py+sy(40)
-    return px,py,pw,ph,gx,gy,cell,gap
+    local gap=sx(6)
+    local rows=math.ceil(BAG_SLOTS/BAG_COLS)
+    local gy0=py+sy(40)                       -- 标题下
+    local bottom=py+ph-sy(48)                 -- 返回按钮上方留白
+    local cw=(pw-sx(20)-gap*(BAG_COLS-1))/BAG_COLS
+    local chh=(bottom-gy0-gap*(rows-1))/rows
+    local cell=math.min(cw, chh)
+    local gx=px+(pw-(cell*BAG_COLS+gap*(BAG_COLS-1)))/2   -- 水平居中
+    return px,py,pw,ph,gx,gy0,cell,gap
 end
 -- 返回某格中心+矩形
 local function bag_cell_rect(i, gx,gy,cell,gap)
@@ -949,9 +955,9 @@ local function draw_bag()
         -- 空格暗底；有物品时品质淡染背景 + 品质边框
         if it then panel(x,y,cell,cell,{border[1]*0.16,border[2]*0.16,border[3]*0.18,0.95},border,6*sw)
         else panel(x,y,cell,cell,{0.1,0.11,0.15,0.9},{0.2,0.21,0.27},6*sw) end
-        if it and not (drag and drag.from=="bag" and drag.slot==i) then
-            draw_item_icon(it, x+cell/2, y+cell/2-sy(2), cell*0.3)
-            if it.qty>1 then setc(UI.text); love.graphics.setFont(font_sm); love.graphics.printf(it.qty, x, y+cell-sy(16), cell-sx(4), "right") end
+        if it and not (drag and drag.moved and drag.from=="bag" and drag.slot==i) then
+            draw_item_icon(it, x+cell/2, y+cell/2-sy(2), cell*0.32)
+            if it.qty>1 then setc(UI.text); love.graphics.setFont(font_sm); love.graphics.printf(it.qty, x, y+cell-sy(15), cell-sx(3), "right") end
         end
     end
     button(px+pw/2-sx(60),py+ph-sy(34),sx(120),sy(28),"返回",{0.4,0.4,0.5},true)
@@ -975,8 +981,8 @@ function love.draw()
     draw_main(); draw_hud(); if not panel_open then bottom_btns() end
     for _,f in ipairs(floats) do love.graphics.setFont(f.scale>1.2 and font_med or font_sm); love.graphics.setColor(f.color[1],f.color[2],f.color[3],math.min(1,f.timer*2)); love.graphics.printf(f.text,f.x*sw-sx(60),f.y*sh,sx(120),"center") end
     if panel_open=="region" then draw_regions() elseif panel_open=="activity" then draw_activity() elseif panel_open=="bag" then draw_bag(); draw_tooltip() elseif panel_open=="equip" then draw_equip(); draw_tooltip() end
-    -- 拖拽中的物品跟随指针
-    if drag and drag.item then
+    -- 拖拽中的物品跟随指针（超过阈值才显示）
+    if drag and drag.moved and drag.item then
         local _,_,_,_,_,_,cell = bag_grid()
         local it=drag.item; local c=item_color(it)
         setc(c,0.85); rrect("fill", drag.x-cell/2, drag.y-cell/2, cell, cell, 6*sw)
@@ -1044,7 +1050,7 @@ local function press(x,y)
         for i=1,BAG_SLOTS do
             local cx,cyy=bag_cell_rect(i,gx,gy,cell,gap)
             if hit(x,y,cx,cyy,cell,cell) and player.inv[i] then
-                drag={ from="bag", slot=i, item=player.inv[i], x=x, y=y, moved=false }; return
+                drag={ from="bag", slot=i, item=player.inv[i], x=x, y=y, sx0=x, sy0=y, moved=false }; return
             end
         end
     end
@@ -1070,10 +1076,21 @@ local function drag_release(x,y)
     if target then inv_swap(d.slot, target) end
 end
 
+-- 拖拽位移阈值：超过才算"拖动"，否则松手算"点击"
+local DRAG_THRESH = 10
+local function drag_move(x,y)
+    if not drag then return end
+    drag.x=x; drag.y=y
+    if not drag.moved then
+        local dx,dy = x-drag.sx0, y-drag.sy0
+        if dx*dx+dy*dy > (DRAG_THRESH*sw)^2 then drag.moved=true end
+    end
+end
+
 function love.touchpressed(id,x,y) press(x,y) end
-function love.touchmoved(id,x,y) if drag then drag.x=x; drag.y=y; drag.moved=true end end
+function love.touchmoved(id,x,y) drag_move(x,y) end
 function love.touchreleased(id,x,y) if drag then drag_release(x,y) end end
 function love.mousepressed(x,y,b) if b==1 then press(x,y) end end
-function love.mousemoved(x,y) if drag then drag.x=x; drag.y=y; drag.moved=true end end
+function love.mousemoved(x,y) drag_move(x,y) end
 function love.mousereleased(x,y,b) if b==1 and drag then drag_release(x,y) end end
 function love.resize() sw=love.graphics.getWidth()/DESIGN_W; sh=love.graphics.getHeight()/DESIGN_H end
