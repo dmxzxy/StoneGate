@@ -388,107 +388,167 @@ end
 local function mat_chip(m, x, y, s) setc(MAT_COLOR[m]); rrect("fill",x-s,y-s,s*2,s*2,s*0.4); love.graphics.setColor(0,0,0,0.3); rrect("line",x-s,y-s,s*2,s*2,s*0.4) end
 
 -- ============================================================================
+-- 图标（用图形代替文字）
+-- ============================================================================
+local function icon_mat(m, cx, cy, s)
+    if m=="wood" then
+        setc({0.55,0.38,0.2}); love.graphics.rectangle("fill",cx-s,cy-s*0.55,s*2,s*1.1,s*0.4)
+        setc({0.72,0.52,0.3}); love.graphics.circle("fill",cx+s*0.7,cy,s*0.42); setc({0.45,0.3,0.16}); love.graphics.circle("line",cx+s*0.7,cy,s*0.42)
+    elseif m=="ore" then
+        setc({0.5,0.52,0.58}); love.graphics.polygon("fill",cx-s,cy+s*0.6,cx-s*0.4,cy-s,cx+s*0.6,cy-s*0.7,cx+s,cy+s*0.6)
+        setc({0.85,0.87,0.95}); love.graphics.circle("fill",cx-s*0.1,cy-s*0.05,s*0.22); love.graphics.circle("fill",cx+s*0.4,cy+s*0.2,s*0.14)
+    else -- herb
+        setc({0.4,0.7,0.35}); love.graphics.ellipse("fill",cx-s*0.45,cy-s*0.1,s*0.5,s*0.95); love.graphics.ellipse("fill",cx+s*0.45,cy-s*0.1,s*0.5,s*0.95)
+        setc({0.3,0.5,0.22}); love.graphics.setLineWidth(math.max(1,1.4*sw)); love.graphics.line(cx,cy-s,cx,cy+s); love.graphics.setLineWidth(1)
+    end
+end
+local function icon_arrow(cx, cy, s, col)
+    setc(col or {0.8,0.8,0.85}); love.graphics.setLineWidth(math.max(1,s*0.32))
+    love.graphics.line(cx-s,cy,cx+s*0.55,cy)
+    love.graphics.line(cx-s,cy,cx-s*0.55,cy-s*0.45); love.graphics.line(cx-s,cy,cx-s*0.55,cy+s*0.45)  -- 尾羽
+    love.graphics.polygon("fill",cx+s,cy,cx+s*0.45,cy-s*0.45,cx+s*0.45,cy+s*0.45)                      -- 箭头
+    love.graphics.setLineWidth(1)
+end
+local function icon_coin(cx,cy,r)
+    setc({0.78,0.58,0.12}); love.graphics.circle("fill",cx,cy,r)
+    setc(UI.gold); love.graphics.circle("fill",cx,cy,r*0.7)
+    setc({1,1,1,0.5}); love.graphics.circle("fill",cx-r*0.25,cy-r*0.25,r*0.18)
+end
+
+-- ============================================================================
 -- 挂机活动场景（一次只画当前活动）
 -- ============================================================================
--- 弓箭手小人（可选挥动工具）
-local function draw_archer(px, py, tool, swingamt)
-    love.graphics.setColor(0.85,0.7,0.55); love.graphics.circle("fill",px,py-sy(24),sx(8))
-    love.graphics.setColor(0.4,0.38,0.34); love.graphics.setLineWidth(2*sw); love.graphics.line(px,py-sy(18),px,py+sy(6))
-    love.graphics.line(px,py+sy(6),px-sx(5),py+sy(20)); love.graphics.line(px,py+sy(6),px+sx(5),py+sy(20))
-    if tool=="bow" then
-        love.graphics.setColor(0.6,0.45,0.2); love.graphics.arc("line","open",px+sx(10),py-sy(8),sx(13),-1.1,1.1)
-    elseif tool then
-        -- 挥动手臂 + 工具（斧/镐/手）
-        local ang = -0.5 + (swingamt or 0)
-        local hx,hy = px+math.cos(ang)*sx(18), py-sy(12)+math.sin(ang)*sy(18)
-        love.graphics.setColor(0.85,0.7,0.55); love.graphics.line(px,py-sy(12),hx,hy)
-        if tool=="axe" then setc({0.7,0.72,0.78}); love.graphics.setLineWidth(3*sw); love.graphics.line(hx,hy,hx+sx(8),hy-sy(4))
-        elseif tool=="pick" then setc({0.7,0.72,0.78}); love.graphics.setLineWidth(3*sw); love.graphics.line(hx-sx(6),hy-sy(5),hx+sx(6),hy+sy(2))
-        end
+-- 粗肢端点圆角
+local function limb(x1,y1,x2,y2,wd)
+    love.graphics.setLineWidth(wd); love.graphics.line(x1,y1,x2,y2)
+    love.graphics.circle("fill",x1,y1,wd/2); love.graphics.circle("fill",x2,y2,wd/2)
+end
+-- 火柴人：圆头 + 粗躯干/四肢 + 待机浮动。pose: idle|bow|chop
+local function draw_archer(px, py, pose, phase)
+    pose = pose or "idle"
+    py = py + math.sin((phase or t_accum)*2)*sy(2)   -- 待机微浮动
+    local skin={0.88,0.74,0.58}; local body={0.5,0.53,0.62}
+    local lw=sx(4.5)
+    local hipY,shY,headY = py-sy(28), py-sy(50), py-sy(63)
+    -- 腿
+    setc(body); limb(px,hipY,px-sx(8),py,lw); limb(px,hipY,px+sx(8),py,lw)
+    -- 躯干
+    limb(px,hipY,px,shY,lw+sx(1.5))
+    -- 头
+    setc(skin); love.graphics.circle("fill",px,headY,sx(10))
+    -- 手臂 + 持物
+    setc(skin)
+    if pose=="bow" then
+        local fx,fy = px+sx(22), shY+sy(2)
+        limb(px,shY,fx,fy,lw)                          -- 持弓前手
+        limb(px,shY,px+sx(8),shY+sy(9),lw)             -- 拉弦手
+        setc({0.62,0.46,0.22}); love.graphics.setLineWidth(sx(2.6)); love.graphics.arc("line","open",fx,fy,sx(15),-1.2,1.2)
+        setc({0.88,0.86,0.78}); love.graphics.setLineWidth(sx(1.2))
+        love.graphics.line(fx+sx(15)*math.cos(-1.2),fy+sx(15)*math.sin(-1.2), px+sx(8),shY+sy(9), fx+sx(15)*math.cos(1.2),fy+sx(15)*math.sin(1.2))
+        love.graphics.setLineWidth(1)
+    elseif pose=="chop" then
+        local amt=math.sin(phase or 0)*0.5+0.5; local ang=-1.2+amt*1.3
+        local hx,hy = px+math.cos(ang)*sx(22), shY+sy(2)+math.sin(ang)*sy(22)
+        limb(px,shY,hx,hy,lw)
+        local tx,ty = hx+math.cos(ang)*sx(15), hy+math.sin(ang)*sx(15)
+        setc({0.45,0.32,0.2}); love.graphics.setLineWidth(sx(2.8)); love.graphics.line(hx,hy,tx,ty)
+        setc({0.78,0.8,0.86}); love.graphics.circle("fill",tx,ty,sx(5)); love.graphics.setLineWidth(1)
+    else
+        limb(px,shY,px-sx(11),shY+sy(15),lw); limb(px,shY,px+sx(11),shY+sy(15),lw)
     end
     love.graphics.setLineWidth(1)
 end
 
+-- 进度圆环（替代部分文字进度）
+local function ring(cx,cy,r,frac,col)
+    setc({1,1,1,0.1}); love.graphics.setLineWidth(sx(3)); love.graphics.circle("line",cx,cy,r)
+    setc(col); love.graphics.arc("line","open",cx,cy,r,-math.pi/2,-math.pi/2+math.pi*2*math.max(0,math.min(1,frac))); love.graphics.setLineWidth(1)
+end
+
 local function draw_combat()
-    local px,py = sx(70), DESIGN_H*0.4*sh
+    local px,py = sx(70), DESIGN_H*0.42*sh
     draw_archer(px,py,"bow")
     if enemy then
         local ex,ey = enemy.x*sw, py; local alpha,scl=1,1
         if enemy.phase=="dying" then local k=math.min(1,enemy.phase_t/DEATH_TIME); alpha=1-k; scl=1+k*0.4
         elseif enemy.phase=="enter" then alpha=math.min(1,enemy.phase_t/(ENTER_TIME*0.5)) end
-        local r=sx(28)*(1+enemy.hurt*0.3)*scl
+        local r=sx(30)*(1+enemy.hurt*0.3)*scl
         if enemy.flash>0 then love.graphics.setColor(1,1,1,alpha) else setc(enemy.color,alpha) end
         love.graphics.circle("fill",ex,ey-r*0.4,r); love.graphics.setColor(0.1,0.1,0.12,alpha)
-        love.graphics.circle("fill",ex-r*0.3,ey-r*0.5,r*0.12); love.graphics.circle("fill",ex+r*0.3,ey-r*0.5,r*0.12)
+        love.graphics.circle("fill",ex-r*0.32,ey-r*0.5,r*0.13); love.graphics.circle("fill",ex+r*0.32,ey-r*0.5,r*0.13)
         if enemy.phase=="fight" then
-            love.graphics.setFont(font_sm); setc(UI.text); love.graphics.printf(enemy.name.."  Lv"..enemy.level, ex-sx(80),ey-r-sy(34),sx(160),"center")
-            bar(ex-sx(60),ey+sy(16),sx(120),sy(11),enemy.hp/enemy.max_hp,UI.bad,math.floor(enemy.hp))
-            bar(ex-sx(60),ey+sy(30),sx(120),sy(5),enemy.atb,{0.9,0.7,0.3})
-        elseif enemy.phase=="enter" then love.graphics.setFont(font_sm); setc(UI.dim,alpha); love.graphics.printf("approaching...",ex-sx(70),ey-r-sy(28),sx(140),"center") end
+            bar(ex-sx(60),ey+sy(18),sx(120),sy(11),enemy.hp/enemy.max_hp,UI.bad,math.floor(enemy.hp))
+            bar(ex-sx(60),ey+sy(32),sx(120),sy(5),enemy.atb,{0.9,0.7,0.3})
+        end
     end
-    if projectile then setc(projectile.crit and UI.gold or projectile.color); love.graphics.setLineWidth(3*sw); love.graphics.line(projectile.x*sw-sx(12),projectile.y*sh,projectile.x*sw,projectile.y*sh); love.graphics.setLineWidth(1) end
-    bar(px-sx(34),py+sy(28),sx(96),sy(10),player.hp/player.max_hp,UI.good,math.floor(player.hp).."/"..player.max_hp)
-    bar(px-sx(34),py+sy(41),sx(96),sy(5),player.atb,{0.4,0.7,1.0})
-    setc(UI.dim); love.graphics.setFont(font_sm); love.graphics.printf(region.name, 0, py-sy(120), love.graphics.getWidth()-sx(10), "right")
+    if projectile then setc(projectile.crit and UI.gold or projectile.color); love.graphics.setLineWidth(3*sw); love.graphics.line(projectile.x*sw-sx(14),projectile.y*sh,projectile.x*sw,projectile.y*sh); love.graphics.setLineWidth(1) end
+    bar(px-sx(38),py+sy(30),sx(100),sy(11),player.hp/player.max_hp,UI.good,math.floor(player.hp).."/"..player.max_hp)
+    bar(px-sx(38),py+sy(44),sx(100),sy(5),player.atb,{0.4,0.7,1.0})
 end
 
 -- 采集场景（砍柴/采矿/采药）
 local function draw_gather()
     local a = ACTIVITIES[activity]
-    local px,py = sx(70), DESIGN_H*0.42*sh
-    local sw_amt = (math.sin(swing*4)*0.5+0.5)   -- 0..1 挥动
-    local tool = (activity=="woodcut" and "axe") or (activity=="mining" and "pick") or "axe"
-    draw_archer(px,py,tool,sw_amt)
-    -- 资源节点（右侧）
-    local nx,ny = DESIGN_W*0.68*sw, py
+    local px,py = sx(80), DESIGN_H*0.46*sh
+    draw_archer(px,py,"chop",swing*5)
+    -- 资源节点
+    local nx,ny = DESIGN_W*0.66*sw, py
     if activity=="woodcut" then
-        setc({0.35,0.25,0.15}); love.graphics.rectangle("fill",nx-sx(5),ny-sy(40),sx(10),sy(40))
-        setc({0.2,0.5,0.25}); love.graphics.circle("fill",nx,ny-sy(50),sx(26))
+        setc({0.35,0.25,0.15}); love.graphics.rectangle("fill",nx-sx(6),ny-sy(46),sx(12),sy(46))
+        setc({0.2,0.5,0.25}); love.graphics.circle("fill",nx,ny-sy(56),sx(30)); setc({0.16,0.42,0.2}); love.graphics.circle("fill",nx-sx(12),ny-sy(48),sx(16))
     elseif activity=="mining" then
-        setc({0.45,0.46,0.52}); love.graphics.polygon("fill", nx-sx(26),ny, nx-sx(14),ny-sy(34), nx+sx(10),ny-sy(28), nx+sx(26),ny)
-        setc({0.7,0.72,0.78}); love.graphics.circle("fill",nx-sx(4),ny-sy(14),sx(4)); love.graphics.circle("fill",nx+sx(8),ny-sy(20),sx(3))
+        setc({0.42,0.44,0.5}); love.graphics.polygon("fill",nx-sx(30),ny,nx-sx(16),ny-sy(38),nx+sx(12),ny-sy(32),nx+sx(30),ny)
+        setc({0.7,0.72,0.78}); love.graphics.circle("fill",nx-sx(4),ny-sy(16),sx(5)); love.graphics.circle("fill",nx+sx(10),ny-sy(22),sx(4))
     else
-        setc({0.2,0.45,0.2}); love.graphics.circle("fill",nx,ny-sy(10),sx(20))
-        setc({0.9,0.6,0.8}); love.graphics.circle("fill",nx-sx(8),ny-sy(14),sx(4)); love.graphics.circle("fill",nx+sx(7),ny-sy(8),sx(4))
+        setc({0.2,0.45,0.2}); love.graphics.circle("fill",nx,ny-sy(12),sx(22))
+        setc({0.9,0.6,0.8}); love.graphics.circle("fill",nx-sx(9),ny-sy(16),sx(5)); love.graphics.circle("fill",nx+sx(8),ny-sy(9),sx(5))
     end
-    -- 大计数
-    love.graphics.setFont(font_big); setc(MAT_COLOR[a.mat])
-    love.graphics.printf(MAT_NAME[a.mat]..": "..(player.mats[a.mat] or 0), 0, py-sy(130), love.graphics.getWidth(), "center")
-    love.graphics.setFont(font_sm); setc(UI.dim)
-    love.graphics.printf(string.format("%s  Lv %d   +%.1f/s", a.name, player.skill[activity] or 1, a.base*(player.skill[activity] or 1)), 0, py-sy(98), love.graphics.getWidth(), "center")
+    -- 顶部：材料图标 + 数量（无文字标签）
+    local cx = love.graphics.getWidth()/2
+    icon_mat(a.mat, cx-sx(40), py-sy(120), sx(13))
+    love.graphics.setFont(font_big); setc(MAT_COLOR[a.mat]); love.graphics.print(player.mats[a.mat] or 0, cx-sx(18), py-sy(134))
+    -- 等级 pips + 每单位进度环
+    ring(cx, py-sy(86), sx(10), player.acc or 0, MAT_COLOR[a.mat])
 end
 
 -- 制造场景
 local function draw_fletch()
-    local px,py = sx(70), DESIGN_H*0.42*sh
-    draw_archer(px,py)
-    -- 工作台
-    setc({0.4,0.3,0.2}); love.graphics.rectangle("fill", px+sx(20), py-sy(4), sx(80), sy(10), 3*sw)
+    local px,py = sx(80), DESIGN_H*0.46*sh
+    draw_archer(px,py,"chop",swing*6)
+    setc({0.4,0.3,0.2}); love.graphics.rectangle("fill",px+sx(22),py-sy(2),sx(70),sy(10),3*sw)
     local tier = player.fletch_target
-    love.graphics.setFont(font_big)
+    local cx = love.graphics.getWidth()/2
     if tier then
-        setc(tier.color); love.graphics.printf("Making "..tier.name, 0, py-sy(130), love.graphics.getWidth(), "center")
-        -- 进度条
-        bar(love.graphics.getWidth()/2-sx(110), py-sy(92), sx(220), sy(16), player.fletch_prog or 0, tier.color)
-        love.graphics.setFont(font_sm); setc(UI.dim)
-        love.graphics.printf("Fletching Lv "..(player.skill.fletch or 1).."   stock: "..(player.arrows[tier.id] or 0), 0, py-sy(70), love.graphics.getWidth(), "center")
+        -- 大箭矢图标(档位色) + 库存数
+        icon_arrow(cx-sx(34), py-sy(118), sx(22), tier.color)
+        love.graphics.setFont(font_big); setc(tier.color); love.graphics.print(player.arrows[tier.id] or 0, cx+sx(2), py-sy(132))
+        bar(cx-sx(100), py-sy(86), sx(200), sy(14), player.fletch_prog or 0, tier.color)
     else
-        setc(UI.bad); love.graphics.printf("Out of materials", 0, py-sy(130), love.graphics.getWidth(), "center")
-        love.graphics.setFont(font_sm); setc(UI.dim); love.graphics.printf("Gather wood / ore / herb first", 0, py-sy(96), love.graphics.getWidth(), "center")
+        -- 缺料：灰箭 + 三种材料图标(够的亮/缺的暗)
+        icon_arrow(cx, py-sy(118), sx(22), {0.4,0.4,0.45})
+        for i,m in ipairs(MATERIALS) do local mx=cx-sx(36)+(i-1)*sx(36)
+            local have=(player.mats[m] or 0)>0
+            if not have then love.graphics.setColor(1,1,1,0.18) end
+            icon_mat(m, mx, py-sy(84), sx(11))
+            if not have then setc(UI.bad); love.graphics.setLineWidth(sx(2)); love.graphics.line(mx-sx(11),py-sy(95),mx+sx(11),py-sy(73)); love.graphics.setLineWidth(1) end
+        end
     end
 end
 
 -- 休息场景
 local function draw_rest()
-    local px,py = love.graphics.getWidth()/2, DESIGN_H*0.42*sh
+    local cx = love.graphics.getWidth()/2
+    local px,py = cx, DESIGN_H*0.46*sh
     -- 篝火
     local f = math.sin(swing*8)*0.2+0.8
-    setc({0.3,0.2,0.12}); love.graphics.rectangle("fill",px-sx(16),py,sx(32),sy(6),2*sw)
-    setc({1.0,0.5*f,0.15}); love.graphics.polygon("fill", px-sx(8),py, px,py-sy(24*f), px+sx(8),py)
-    setc({1.0,0.8,0.3,0.8}); love.graphics.polygon("fill", px-sx(4),py, px,py-sy(12*f), px+sx(4),py)
-    draw_archer(px-sx(50),py+sy(2))
-    love.graphics.setFont(font_med); setc(UI.text); love.graphics.printf("Resting", 0, py-sy(120), love.graphics.getWidth(), "center")
-    love.graphics.setFont(font_sm); setc(UI.dim); love.graphics.printf("open Activity to start an idle task", 0, py-sy(92), love.graphics.getWidth(), "center")
+    setc({0.3,0.2,0.12}); love.graphics.rectangle("fill",px-sx(18),py,sx(36),sy(7),2*sw)
+    setc({1.0,0.5*f,0.15}); love.graphics.polygon("fill",px-sx(10),py,px,py-sy(28*f),px+sx(10),py)
+    setc({1.0,0.8,0.3,0.85}); love.graphics.polygon("fill",px-sx(5),py,px,py-sy(14*f),px+sx(5),py)
+    draw_archer(px-sx(56),py+sy(2))
+    -- Zzz（图形，无说明文字）
+    setc(UI.dim)
+    for i=0,2 do local zs=sx(7-i*1.5); local zx,zy=px-sx(64)+i*sx(11), py-sy(78)-i*sy(14)
+        love.graphics.setFont(i==0 and font_med or font_sm); love.graphics.print("z", zx, zy) end
 end
 
 -- 主视图：按当前活动渲染 + 共享粒子
@@ -503,18 +563,18 @@ end
 
 local function draw_hud()
     local w=love.graphics.getWidth()
-    local bh=sy(50)
+    local bh=sy(46)
     love.graphics.setColor(0.05,0.06,0.1,0.94); love.graphics.rectangle("fill",0,0,w,bh)
     love.graphics.setColor(UI.btn[1],UI.btn[2],UI.btn[3],0.5); love.graphics.rectangle("fill",0,bh-2*sh,w,2*sh)
     -- 左：等级 + 经验条
-    love.graphics.setFont(font_med); setc(UI.text); love.graphics.print("Lv "..player.level, sx(10), sy(5))
-    bar(sx(10), sy(32), sx(140), sy(9), player.xp/player.xp_next, UI.xp, math.floor(player.xp).."/"..player.xp_next)
-    -- 右上：金币
-    love.graphics.setFont(font_sm); setc(UI.gold); love.graphics.printf("Gold "..player.gold, 0, sy(7), w-sx(10), "right")
-    -- 右下：当前箭档
-    local atxt = player.arrow_tier and (player.arrow_tier.name.." x"..(player.arrows[player.arrow_tier.id] or 0)) or "No Arrows"
-    setc(player.arrow_tier and player.arrow_tier.color or UI.bad); love.graphics.printf(atxt, 0, sy(28), w-sx(10), "right")
-    if toast then love.graphics.setFont(font_sm); setc(toast.color,math.min(1,toast.timer)); love.graphics.printf(toast.text,0,sy(54),w-sx(10),"right") end
+    love.graphics.setFont(font_med); setc(UI.text); love.graphics.print(player.level, sx(10), sy(5))
+    bar(sx(34), sy(9), sx(130), sy(10), player.xp/player.xp_next, UI.xp)
+    -- 右：金币图标+数、箭矢图标(档色)+数
+    icon_coin(w-sx(120), sy(15), sx(8)); setc(UI.gold); love.graphics.setFont(font_sm); love.graphics.print(player.gold, w-sx(108), sy(9))
+    local acol = player.arrow_tier and player.arrow_tier.color or {0.5,0.3,0.3}
+    local acnt = player.arrow_tier and (player.arrows[player.arrow_tier.id] or 0) or 0
+    icon_arrow(w-sx(56), sy(15), sx(11), acol); setc(acol); love.graphics.print(acnt, w-sx(38), sy(9))
+    if toast then love.graphics.setFont(font_sm); setc(toast.color,math.min(1,toast.timer)); love.graphics.printf(toast.text,0,sy(50),w-sx(10),"right") end
 end
 
 local function bottom_btns()
