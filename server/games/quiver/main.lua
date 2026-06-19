@@ -122,6 +122,9 @@ local panel_open = nil       -- 覆盖菜单：nil|"activity"|"gear"|"region"
 local result_banner, toast
 local swing = 0              -- 采集挥动动画相位
 
+-- atan2 兼容：LuaJIT(LÖVE) 有 math.atan2；标准 Lua 5.3+ 用双参 math.atan
+local atan2 = math.atan2 or math.atan
+
 local function sx(v) return v*sw end
 local function sy(v) return v*sh end
 
@@ -297,15 +300,23 @@ local function drop_loot()
     end
 end
 
+-- 战斗布景的设计坐标（draw_combat 与抛射物共用，保证箭从弓口射出）
+local CB_ARCHER_X, CB_ARCHER_Y = 70, DESIGN_H*0.42   -- 弓箭手脚底
+local CB_BOW_X, CB_BOW_Y = 90, DESIGN_H*0.42-46       -- 弓口位置
+local CB_ENEMY_Y = DESIGN_H*0.42-12                   -- 敌人身体中心
+
 local function archer_fire()
     -- 取最高可用箭档，消耗 1 支；无箭则简易箭(0.5x)
     local mult, tier = 0.5, nil
     for i=#ARROW_TIERS,1,-1 do local id=ARROW_TIERS[i].id; if (player.arrows[id] or 0)>0 then mult=ARROW_TIERS[i].mult; tier=ARROW_TIERS[i]; player.arrows[id]=player.arrows[id]-1; break end end
-    if tier==nil then recalc() end  -- 刚打光，刷新显示
+    if tier==nil then recalc() end
     local crit = math.random()<player.crit
     local raw = player.attack*mult*(crit and CRIT_MULT or 1)
     local dmg = math.max(1, raw*(1-mitigation(enemy.armor)))
-    projectile = { x=DESIGN_W*0.18, tx=ENEMY_HOME_X, y=DESIGN_H*0.2, dmg=dmg, crit=crit, color=tier and tier.color or {0.7,0.7,0.7}, t=0 }
+    -- 「普通攻击」：从弓口射出的抛射物，飞向敌人身体中心
+    local tx, ty = (enemy and enemy.x or ENEMY_HOME_X), CB_ENEMY_Y
+    local ang = atan2(ty-CB_BOW_Y, tx-CB_BOW_X)
+    projectile = { x=CB_BOW_X, y=CB_BOW_Y, tx=tx, ty=ty, ang=ang, dmg=dmg, crit=crit, color=tier and tier.color or {0.7,0.7,0.7}, t=0 }
 end
 local function resolve_hit(p)
     enemy.hp=enemy.hp-p.dmg; enemy.flash=0.1; enemy.hurt=0.2
@@ -334,8 +345,11 @@ local function update(dt)
     if activity ~= "combat" then return end
     if not enemy then next_enemy() end
     if projectile then
-        projectile.x=projectile.x+(projectile.tx-projectile.x)*math.min(1,dt*18); projectile.t=projectile.t+dt*6
-        if projectile.t>=1 or math.abs(projectile.x-projectile.tx)<sx(8) then resolve_hit(projectile); projectile=nil end
+        local k=math.min(1,dt*18)
+        projectile.x=projectile.x+(projectile.tx-projectile.x)*k
+        projectile.y=projectile.y+(projectile.ty-projectile.y)*k
+        projectile.t=projectile.t+dt*6
+        if projectile.t>=1 or math.abs(projectile.x-projectile.tx)<8 then resolve_hit(projectile); projectile=nil end
         return
     end
     enemy.flash=math.max(0,enemy.flash-dt); enemy.hurt=math.max(0,enemy.hurt-dt)
@@ -509,7 +523,15 @@ local function draw_combat()
             bar(ex-sx(60),ey+sy(32),sx(120),sy(5),enemy.atb,{0.9,0.7,0.3})
         end
     end
-    if projectile then setc(projectile.crit and UI.gold or projectile.color); love.graphics.setLineWidth(3*sw); love.graphics.line(projectile.x*sw-sx(14),projectile.y*sh,projectile.x*sw,projectile.y*sh); love.graphics.setLineWidth(1) end
+    if projectile then
+        setc(projectile.crit and UI.gold or projectile.color); love.graphics.setLineWidth(math.max(2,sx(2.5)))
+        local hx,hy = projectile.x*sw, projectile.y*sh
+        local ca,sa = math.cos(projectile.ang or 0), math.sin(projectile.ang or 0)
+        love.graphics.line(hx-ca*sx(14), hy-sa*sx(14), hx, hy)
+        -- 箭头
+        love.graphics.polygon("fill", hx,hy, hx-ca*sx(6)-sa*sx(3), hy-sa*sx(6)+ca*sx(3), hx-ca*sx(6)+sa*sx(3), hy-sa*sx(6)-ca*sx(3))
+        love.graphics.setLineWidth(1)
+    end
     bar(px-sx(38),py+sy(30),sx(100),sy(11),player.hp/player.max_hp,UI.good,math.floor(player.hp).."/"..player.max_hp)
     bar(px-sx(38),py+sy(44),sx(100),sy(5),player.atb,{0.4,0.7,1.0})
 end
