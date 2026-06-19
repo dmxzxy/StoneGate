@@ -121,12 +121,48 @@ local activity = "rest"      -- 当前挂机活动：rest|woodcut|mining|herb|fl
 local panel_open = nil       -- 覆盖菜单：nil|"activity"|"gear"|"region"
 local result_banner, toast
 local swing = 0              -- 采集挥动动画相位
+local drag = nil             -- 拖拽中：{from="bag"/"equip", slot=, item=, x=, y=, moved=}
 
 -- atan2 兼容：LuaJIT(LÖVE) 有 math.atan2；标准 Lua 5.3+ 用双参 math.atan
 local atan2 = math.atan2 or math.atan
 
 local function sx(v) return v*sw end
 local function sy(v) return v*sh end
+
+-- ============================================================================
+-- 统一物品 / 格子背包模型（材料/箭矢可堆叠；装备占一格）
+-- item: {kind="mat"/"arrow", id=, qty=}  或  {kind="gear", gear=<obj>, qty=1}
+-- player.inv = 定长格子数组（nil 或 item）
+-- ============================================================================
+local BAG_SLOTS = 24
+local function inv_count(kind,id)
+    local n=0; for i=1,BAG_SLOTS do local it=player.inv[i]; if it and it.kind==kind and it.id==id then n=n+it.qty end end; return n
+end
+local function inv_add(kind,id,qty,gear)
+    if kind=="gear" then
+        for i=1,BAG_SLOTS do if not player.inv[i] then player.inv[i]={kind="gear",gear=gear,qty=1}; return true end end
+        return false
+    end
+    for i=1,BAG_SLOTS do local it=player.inv[i]; if it and it.kind==kind and it.id==id then it.qty=it.qty+qty; return true end end
+    for i=1,BAG_SLOTS do if not player.inv[i] then player.inv[i]={kind=kind,id=id,qty=qty}; return true end end
+    return false
+end
+local function inv_remove(kind,id,n)
+    for i=1,BAG_SLOTS do local it=player.inv[i]; if it and it.kind==kind and it.id==id then
+        local take=math.min(n,it.qty); it.qty=it.qty-take; n=n-take; if it.qty<=0 then player.inv[i]=nil end
+        if n<=0 then break end end end
+end
+-- 交换/移动/堆叠两个格子（拖拽用）
+local function inv_swap(a,b)
+    if a==b then return end
+    local ia,ib = player.inv[a], player.inv[b]
+    -- 同类可堆叠 → 合并
+    if ia and ib and ia.kind==ib.kind and ia.id==ib.id and ia.kind~="gear" then
+        ib.qty=ib.qty+ia.qty; player.inv[a]=nil; return
+    end
+    player.inv[a], player.inv[b] = ib, ia
+end
+
 
 -- ============================================================================
 -- 装备
@@ -186,7 +222,7 @@ local function recalc()
     if player.hp==nil or player.hp>player.max_hp then player.hp=player.max_hp end
     -- 当前箭档倍率（用于 DPS 估算与显示）
     player.arrow_mult, player.arrow_tier = 0.5, nil
-    for i=#ARROW_TIERS,1,-1 do if (player.arrows[ARROW_TIERS[i].id] or 0)>0 then player.arrow_mult=ARROW_TIERS[i].mult; player.arrow_tier=ARROW_TIERS[i]; break end end
+    for i=#ARROW_TIERS,1,-1 do if inv_count("arrow",ARROW_TIERS[i].id)>0 then player.arrow_mult=ARROW_TIERS[i].mult; player.arrow_tier=ARROW_TIERS[i]; break end end
     local cf = 1 + player.crit*(CRIT_MULT-1)
     player.dps = player.attack * player.arrow_mult * cf * player.atk_speed
 end
@@ -212,13 +248,13 @@ end
 -- 箭矢制作
 -- ============================================================================
 local function can_craft(tier)
-    for m,n in pairs(tier.cost) do if (player.mats[m] or 0) < n then return false end end
+    for m,n in pairs(tier.cost) do if inv_count("mat",m) < n then return false end end
     return true
 end
 local function craft(tier)
     if not can_craft(tier) then return end
-    for m,n in pairs(tier.cost) do player.mats[m] = player.mats[m] - n end
-    player.arrows[tier.id] = (player.arrows[tier.id] or 0) + ARROW_BATCH
+    for m,n in pairs(tier.cost) do inv_remove("mat",m,n) end
+    inv_add("arrow",tier.id,ARROW_BATCH)
     recalc()
 end
 
@@ -244,7 +280,7 @@ local function activity_tick(dt)
         local lvl = player.skill[activity] or 1
         player.acc = (player.acc or 0) + a.base * lvl * dt
         while player.acc >= 1 do
-            player.mats[a.mat] = (player.mats[a.mat] or 0) + 1
+            inv_add("mat",a.mat,1)
             player.acc = player.acc - 1
             -- 采集碎屑（juice）
             local nx,ny = DESIGN_W*0.68, DESIGN_H*0.42
@@ -296,9 +332,11 @@ local function drop_loot()
         local g = roll_gear(SLOTS[math.random(#SLOTS)], region.ilvl, rid)
         local cur = player.equip[g.slot]
         if not cur or gear_score(g) > gear_score(cur) then
-            if cur then player.bag[#player.bag+1]=cur end
             player.equip[g.slot]=g; recalc(); set_toast("已装备 "..gear_full_name(g), gear_color(g))
-        elseif #player.bag<24 then player.bag[#player.bag+1]=g end
+            if cur then inv_add("gear",nil,1,cur) end
+        else
+            inv_add("gear",nil,1,g)
+        end
     end
 end
 
@@ -310,7 +348,7 @@ local CB_ENEMY_Y = DESIGN_H*0.42-12                   -- 敌人身体中心
 local function archer_fire()
     -- 取最高可用箭档，消耗 1 支；无箭则简易箭(0.5x)
     local mult, tier = 0.5, nil
-    for i=#ARROW_TIERS,1,-1 do local id=ARROW_TIERS[i].id; if (player.arrows[id] or 0)>0 then mult=ARROW_TIERS[i].mult; tier=ARROW_TIERS[i]; player.arrows[id]=player.arrows[id]-1; break end end
+    for i=#ARROW_TIERS,1,-1 do local id=ARROW_TIERS[i].id; if inv_count("arrow",id)>0 then mult=ARROW_TIERS[i].mult; tier=ARROW_TIERS[i]; inv_remove("arrow",id,1); break end end
     if tier==nil then recalc() end
     local crit = math.random()<player.crit
     local raw = player.attack*mult*(crit and CRIT_MULT or 1)
@@ -370,10 +408,11 @@ end
 -- ============================================================================
 local function init()
     player = { level=1, xp=0, xp_next=xp_need(1), base_str=5, base_agi=5, base_sta=5,
-        gold=0, hp=nil, equip={}, bag={}, atb=0,
-        mats={ wood=8, ore=4, herb=2 }, arrows={ wood=30 },
+        gold=0, hp=nil, equip={}, inv={}, atb=0,
         skill={ woodcut=1, mining=1, herb=1, fletch=1 },
         acc=0, fletch_prog=0, fletch_target=nil, fletch_blueprint="wood" }
+    -- 初始物品入格
+    inv_add("mat","wood",8); inv_add("mat","ore",4); inv_add("mat","herb",2); inv_add("arrow","wood",30)
     player.equip.bow = roll_gear("bow", 1, "uncommon")
     recalc(); player.hp=player.max_hp
     region=REGIONS[1]; stage=0; floats={}; particles={}; projectile=nil; result_banner=nil; toast=nil
@@ -568,7 +607,7 @@ local function draw_gather()
     -- 顶部：材料图标 + 数量（无文字标签）
     local cx = love.graphics.getWidth()/2
     icon_mat(a.mat, cx-sx(40), py-sy(120), sx(13))
-    love.graphics.setFont(font_big); setc(MAT_COLOR[a.mat]); love.graphics.print(player.mats[a.mat] or 0, cx-sx(18), py-sy(134))
+    love.graphics.setFont(font_big); setc(MAT_COLOR[a.mat]); love.graphics.print(inv_count("mat",a.mat), cx-sx(18), py-sy(134))
     -- 等级 pips + 每单位进度环
     ring(cx, py-sy(86), sx(10), player.acc or 0, MAT_COLOR[a.mat])
 end
@@ -583,7 +622,7 @@ local function draw_fletch()
     if tier and can_craft(tier) then
         -- 正在制造：大箭图标(档色) + 库存 + 进度
         icon_arrow(cx-sx(34), py-sy(116), sx(20), tier.color)
-        love.graphics.setFont(font_big); setc(tier.color); love.graphics.print(player.arrows[tier.id] or 0, cx+sx(2), py-sy(130))
+        love.graphics.setFont(font_big); setc(tier.color); love.graphics.print(inv_count("arrow",tier.id), cx+sx(2), py-sy(130))
         love.graphics.setFont(font_sm); setc(UI.dim); love.graphics.printf("正在制造 "..tier.name, 0, py-sy(140), love.graphics.getWidth(), "center")
         bar(cx-sx(100), py-sy(84), sx(200), sy(14), player.fletch_prog or 0, tier.color)
     else
@@ -592,10 +631,10 @@ local function draw_fletch()
         love.graphics.setFont(font_sm); setc(UI.bad); love.graphics.printf("材料不足", 0, py-sy(140), love.graphics.getWidth(), "center")
         local need = tier and tier.cost or {}
         local i=0; for m,n in pairs(need) do local mx=cx-sx(36)+i*sx(40); i=i+1
-            local ok=(player.mats[m] or 0)>=n
+            local ok=inv_count("mat",m)>=n
             if not ok then love.graphics.setColor(1,1,1,0.2) end
             icon_mat(m, mx, py-sy(82), sx(11))
-            setc(ok and UI.text or UI.bad); love.graphics.setFont(font_sm); love.graphics.print((player.mats[m] or 0).."/"..n, mx-sx(8), py-sy(66))
+            setc(ok and UI.text or UI.bad); love.graphics.setFont(font_sm); love.graphics.print(inv_count("mat",m).."/"..n, mx-sx(8), py-sy(66))
         end
     end
 end
@@ -637,7 +676,7 @@ local function draw_hud()
     -- 右：金币图标+数、箭矢图标(档色)+数
     icon_coin(w-sx(120), sy(15), sx(8)); setc(UI.gold); love.graphics.setFont(font_sm); love.graphics.print(player.gold, w-sx(108), sy(9))
     local acol = player.arrow_tier and player.arrow_tier.color or {0.5,0.3,0.3}
-    local acnt = player.arrow_tier and (player.arrows[player.arrow_tier.id] or 0) or 0
+    local acnt = player.arrow_tier and inv_count("arrow",player.arrow_tier.id) or 0
     icon_arrow(w-sx(56), sy(15), sx(11), acol); setc(acol); love.graphics.print(acnt, w-sx(38), sy(9))
     if toast then love.graphics.setFont(font_sm); setc(toast.color,math.min(1,toast.timer)); love.graphics.printf(toast.text,0,sy(50),w-sx(10),"right") end
 end
@@ -715,14 +754,13 @@ local function draw_activity()
     -- 材料栏
     local my=py+ph-sy(56); love.graphics.setColor(0.06,0.07,0.11,0.9); rrect("fill",px+sx(6),my-sy(4),pw-sx(12),sy(24),5*sw)
     local mw=(pw-sx(12))/#MATERIALS
-    for i,m in ipairs(MATERIALS) do local mx=px+sx(6)+(i-1)*mw; mat_chip(m,mx+sx(16),my+sy(8),sx(6)); setc(UI.text); love.graphics.setFont(font_sm); love.graphics.print(MAT_NAME[m]..": "..(player.mats[m] or 0), mx+sx(26),my+sy(2)) end
+    for i,m in ipairs(MATERIALS) do local mx=px+sx(6)+(i-1)*mw; mat_chip(m,mx+sx(16),my+sy(8),sx(6)); setc(UI.text); love.graphics.setFont(font_sm); love.graphics.print(MAT_NAME[m]..": "..inv_count("mat",m), mx+sx(26),my+sy(2)) end
     button(px+pw/2-sx(60),py+ph-sy(32),sx(120),sy(26),"返回",{0.4,0.4,0.5},true)
 end
 
 -- ============================================================================
 -- 装备栏（WoW 式 paperdoll + Bag）
 -- ============================================================================
-local gear_tab = "doll"
 local tooltip = nil   -- { g=gear, src="equip"|"bag", idx=bagindex }
 -- 槽位类型图标（4 种，复用）
 local function icon_kind(kind, cx, cy, s, col)
@@ -776,11 +814,11 @@ local function tt_content(tt)
             RAR[g.rarity].name.."  ·  "..SLOT_INFO[g.slot].name.."  ·  装等 "..g.ilvl,
             gear_detail_lines(g), (tt.src=="bag") and "装备" or nil
     elseif tt.kind=="mat" then
-        local lines={ {"持有："..(player.mats[tt.id] or 0), UI.text}, {MAT_DESC[tt.id] or "", UI.dim} }
+        local lines={ {"持有："..inv_count("mat",tt.id), UI.text}, {MAT_DESC[tt.id] or "", UI.dim} }
         return MAT_NAME[tt.id], MAT_COLOR[tt.id], "材料 · 可堆叠", lines, nil
     else -- arrow
         local t; for _,a in ipairs(ARROW_TIERS) do if a.id==tt.id then t=a end end
-        local lines={ {"持有："..(player.arrows[tt.id] or 0).." 支", UI.text}, {arrow_desc(t), UI.dim} }
+        local lines={ {"持有："..inv_count("arrow",tt.id).." 支", UI.text}, {arrow_desc(t), UI.dim} }
         -- 配方
         local parts={}; for m,n in pairs(t.cost) do parts[#parts+1]=MAT_NAME[m].."x"..n end
         lines[#lines+1]={ "配方："..table.concat(parts,"  "), {0.6,0.7,0.85} }
@@ -824,9 +862,10 @@ local function tooltip_press(x,y)
     if tooltip.kind=="gear" and tooltip.src=="bag" then
         local bw=(tw-sx(40))/2
         if x>=tx+sx(14) and x<=tx+sx(14)+bw and y>=fy and y<=fy+sy(30) then
-            local i=tooltip.idx; local g=tooltip.g
-            if player.bag[i]==g then table.remove(player.bag,i) end
-            local old=player.equip[g.slot]; player.equip[g.slot]=g; if old then player.bag[#player.bag+1]=old end
+            -- 从背包格穿戴：清空该格，旧装备回到背包
+            local i=tooltip.slot; local g=tooltip.g
+            if i and player.inv[i] and player.inv[i].gear==g then player.inv[i]=nil end
+            local old=player.equip[g.slot]; player.equip[g.slot]=g; if old then inv_add("gear",nil,1,old) end
             recalc(); tooltip=nil; return
         end
     end
@@ -866,46 +905,54 @@ local function draw_equip()
 end
 
 -- 背包面板：材料 / 箭矢 / 装备 三区，可堆叠 + 图标，点击看说明
--- 返回各可点项的矩形，供 press 复用
-local function bag_layout()
+-- 物品图标分发（材料/箭矢/装备）
+local function item_color(it)
+    if it.kind=="gear" then return gear_color(it.gear)
+    elseif it.kind=="arrow" then for _,t in ipairs(ARROW_TIERS) do if t.id==it.id then return t.color end end
+    else return MAT_COLOR[it.id] end
+    return UI.dim
+end
+local function draw_item_icon(it, cx, cy, s)
+    if it.kind=="mat" then icon_mat(it.id, cx, cy, s)
+    elseif it.kind=="arrow" then local t; for _,a in ipairs(ARROW_TIERS) do if a.id==it.id then t=a end end; icon_arrow(cx, cy, s, t and t.color)
+    else icon_kind(SLOT_INFO[it.gear.slot].kind, cx, cy, s, gear_color(it.gear)) end
+end
+
+-- 背包网格几何（draw 与 press/drag 共用）
+local BAG_COLS = 4
+local function bag_grid()
     local w,h=love.graphics.getWidth(),love.graphics.getHeight()
     local px,py,pw,ph=sx(16),sy(56),w-sx(32),h-sy(112)
-    return px,py,pw,ph
+    local gap=sx(8); local cell=(pw-sx(20)-gap*(BAG_COLS-1))/BAG_COLS
+    local gx,gy=px+sx(10), py+sy(40)
+    return px,py,pw,ph,gx,gy,cell,gap
 end
+-- 返回某格中心+矩形
+local function bag_cell_rect(i, gx,gy,cell,gap)
+    local c=(i-1)%BAG_COLS; local r=math.floor((i-1)/BAG_COLS)
+    local x=gx+c*(cell+gap); local y=gy+r*(cell+gap)
+    return x,y
+end
+
 local function draw_bag()
     local w,h=love.graphics.getWidth(),love.graphics.getHeight(); love.graphics.setColor(0,0,0,0.72); love.graphics.rectangle("fill",0,0,w,h)
-    local px,py,pw,ph=bag_layout(); panel(px,py,pw,ph,{0.09,0.1,0.15,0.98},UI.line,10*sw)
+    local px,py,pw,ph,gx,gy,cell,gap = bag_grid(); panel(px,py,pw,ph,{0.09,0.1,0.15,0.98},UI.line,10*sw)
     love.graphics.setFont(font_med); setc(UI.text); love.graphics.printf("背包",px,py+sy(8),pw,"center")
-    local function header(t,y) setc(UI.dim); love.graphics.setFont(font_sm); love.graphics.print(t, px+sx(14), y) end
-    -- 材料区
-    header("材料", py+sy(40))
-    local mcw=(pw-sx(20))/3
-    for i,m in ipairs(MATERIALS) do
-        local cx=px+sx(10)+(i-1)*mcw; local cyy=py+sy(58)
-        panel(cx,cyy,mcw-sx(6),sy(40),{0.11,0.12,0.17,0.95},UI.line,6*sw)
-        icon_mat(m, cx+sx(18), cyy+sy(20), sx(11))
-        setc(UI.text); love.graphics.setFont(font_sm); love.graphics.print(player.mats[m] or 0, cx+sx(34), cyy+sy(13))
-    end
-    -- 箭矢区
-    header("箭矢", py+sy(108))
-    local acw=(pw-sx(20))/4
-    for i,t in ipairs(ARROW_TIERS) do
-        local cx=px+sx(10)+(i-1)*acw; local cyy=py+sy(126)
-        panel(cx,cyy,acw-sx(6),sy(40),{t.color[1]*0.15,t.color[2]*0.15,t.color[3]*0.18,0.95},{t.color[1]*0.6,t.color[2]*0.6,t.color[3]*0.6},6*sw)
-        icon_arrow(cx+sx(16), cyy+sy(20), sx(10), t.color)
-        setc(t.color); love.graphics.setFont(font_sm); love.graphics.print(player.arrows[t.id] or 0, cx+sx(30), cyy+sy(13))
-    end
-    -- 装备区
-    header("装备 ("..#player.bag..")", py+sy(176))
-    local ly=py+sy(194); local rh=sy(38)
-    if #player.bag==0 then setc({0.42,0.42,0.48}); love.graphics.setFont(font_sm); love.graphics.print("（暂无，战斗掉落）", px+sx(14), ly) end
-    for i,g in ipairs(player.bag) do
-        local y=ly+(i-1)*(rh+sy(4)); if y+rh>py+ph-sy(46) then break end
-        local rc=gear_color(g); panel(px+sx(10),y,pw-sx(20),rh,{rc[1]*0.16,rc[2]*0.16,rc[3]*0.18,0.95},{rc[1]*0.7,rc[2]*0.7,rc[3]*0.7},6*sw)
-        setc(rc); love.graphics.rectangle("fill",px+sx(10),y,3*sw,rh,1.5*sw,1.5*sw)
-        icon_kind(SLOT_INFO[g.slot].kind, px+sx(28), y+rh/2, sx(8), rc)
-        setc(rc); love.graphics.setFont(font_sm); love.graphics.print(gear_full_name(g), px+sx(46), y+sy(4))
-        setc(UI.dim); love.graphics.print(SLOT_INFO[g.slot].name.." · 装等"..g.ilvl, px+sx(46), y+sy(21))
+    -- 已用格数
+    local used=0; for i=1,BAG_SLOTS do if player.inv[i] then used=used+1 end end
+    love.graphics.setFont(font_sm); setc(UI.dim); love.graphics.printf(used.."/"..BAG_SLOTS, px, py+sy(12), pw-sx(14), "right")
+    -- 格子
+    for i=1,BAG_SLOTS do
+        local x,y=bag_cell_rect(i,gx,gy,cell,gap)
+        local it=player.inv[i]
+        local border = it and item_color(it) or {0.22,0.23,0.3}
+        -- 空格暗底；有物品时品质淡染背景 + 品质边框
+        if it then panel(x,y,cell,cell,{border[1]*0.16,border[2]*0.16,border[3]*0.18,0.95},border,6*sw)
+        else panel(x,y,cell,cell,{0.1,0.11,0.15,0.9},{0.2,0.21,0.27},6*sw) end
+        if it and not (drag and drag.from=="bag" and drag.slot==i) then
+            draw_item_icon(it, x+cell/2, y+cell/2-sy(2), cell*0.3)
+            if it.qty>1 then setc(UI.text); love.graphics.setFont(font_sm); love.graphics.printf(it.qty, x, y+cell-sy(16), cell-sx(4), "right") end
+        end
     end
     button(px+pw/2-sx(60),py+ph-sy(34),sx(120),sy(28),"返回",{0.4,0.4,0.5},true)
 end
@@ -928,6 +975,14 @@ function love.draw()
     draw_main(); draw_hud(); if not panel_open then bottom_btns() end
     for _,f in ipairs(floats) do love.graphics.setFont(f.scale>1.2 and font_med or font_sm); love.graphics.setColor(f.color[1],f.color[2],f.color[3],math.min(1,f.timer*2)); love.graphics.printf(f.text,f.x*sw-sx(60),f.y*sh,sx(120),"center") end
     if panel_open=="region" then draw_regions() elseif panel_open=="activity" then draw_activity() elseif panel_open=="bag" then draw_bag(); draw_tooltip() elseif panel_open=="equip" then draw_equip(); draw_tooltip() end
+    -- 拖拽中的物品跟随指针
+    if drag and drag.item then
+        local _,_,_,_,_,_,cell = bag_grid()
+        local it=drag.item; local c=item_color(it)
+        setc(c,0.85); rrect("fill", drag.x-cell/2, drag.y-cell/2, cell, cell, 6*sw)
+        draw_item_icon(it, drag.x, drag.y-sy(2), cell*0.3)
+        if it.qty>1 then setc(UI.text); love.graphics.setFont(font_sm); love.graphics.printf(it.qty, drag.x-cell/2, drag.y+cell/2-sy(16), cell-sx(4), "right") end
+    end
     if result_banner=="defeat" then
         love.graphics.setColor(0,0,0,0.7); love.graphics.rectangle("fill",0,0,love.graphics.getWidth(),love.graphics.getHeight())
         love.graphics.setFont(font_big); setc(UI.bad); love.graphics.printf("已阵亡",0,love.graphics.getHeight()*0.4,love.graphics.getWidth(),"center")
@@ -983,20 +1038,42 @@ local function press(x,y)
         end
     elseif panel_open=="bag" then
         if tooltip then tooltip_press(x,y); return end
-        local px,py,pw,ph=sx(16),sy(56),w-sx(32),h-sy(112)
+        local px,py,pw,ph,gx,gy,cell,gap = bag_grid()
         if hit(x,y,px+pw/2-sx(60),py+ph-sy(34),sx(120),sy(28)) then panel_open=nil; return end
-        -- 材料格
-        local mcw=(pw-sx(20))/3
-        for i,m in ipairs(MATERIALS) do local cx=px+sx(10)+(i-1)*mcw; if hit(x,y,cx,py+sy(58),mcw-sx(6),sy(40)) then tooltip={kind="mat",id=m}; return end end
-        -- 箭矢格
-        local acw=(pw-sx(20))/4
-        for i,t in ipairs(ARROW_TIERS) do local cx=px+sx(10)+(i-1)*acw; if hit(x,y,cx,py+sy(126),acw-sx(6),sy(40)) then tooltip={kind="arrow",id=t.id}; return end end
-        -- 装备行
-        local ly=py+sy(194); local rh=sy(38)
-        for i,g in ipairs(player.bag) do local yy=ly+(i-1)*(rh+sy(4)); if yy+rh>py+ph-sy(46) then break end
-            if hit(x,y,px+sx(10),yy,pw-sx(20),rh) then tooltip={kind="gear",g=g,src="bag",idx=i}; return end end
+        -- 命中某格 → 开始拖拽（松手再决定 点开tooltip / 交换 / 装备）
+        for i=1,BAG_SLOTS do
+            local cx,cyy=bag_cell_rect(i,gx,gy,cell,gap)
+            if hit(x,y,cx,cyy,cell,cell) and player.inv[i] then
+                drag={ from="bag", slot=i, item=player.inv[i], x=x, y=y, moved=false }; return
+            end
+        end
     end
 end
+
+-- 拖拽放下：根据落点处理 交换 / 装备 / 点击看详情
+local function drag_release(x,y)
+    if not drag then return end
+    local d=drag; drag=nil
+    local px,py,pw,ph,gx,gy,cell,gap = bag_grid()
+    -- 落在某格
+    local target=nil
+    for i=1,BAG_SLOTS do local cx,cyy=bag_cell_rect(i,gx,gy,cell,gap); if hit(x,y,cx,cyy,cell,cell) then target=i; break end end
+    if not d.moved and target==d.slot then
+        -- 视为点击 → 弹详情
+        local it=player.inv[d.slot]
+        if it then
+            if it.kind=="gear" then tooltip={ kind="gear", g=it.gear, src="bag", slot=d.slot }
+            else tooltip={ kind=it.kind, id=it.id } end
+        end
+        return
+    end
+    if target then inv_swap(d.slot, target) end
+end
+
 function love.touchpressed(id,x,y) press(x,y) end
+function love.touchmoved(id,x,y) if drag then drag.x=x; drag.y=y; drag.moved=true end end
+function love.touchreleased(id,x,y) if drag then drag_release(x,y) end end
 function love.mousepressed(x,y,b) if b==1 then press(x,y) end end
+function love.mousemoved(x,y) if drag then drag.x=x; drag.y=y; drag.moved=true end end
+function love.mousereleased(x,y,b) if b==1 and drag then drag_release(x,y) end end
 function love.resize() sw=love.graphics.getWidth()/DESIGN_W; sh=love.graphics.getHeight()/DESIGN_H end
