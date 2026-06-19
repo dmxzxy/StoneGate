@@ -54,6 +54,9 @@ local SLOT_INFO = {
 }
 local SLOTS_L = { "head","shoulder","chest","hands","legs","feet" }
 local SLOTS_R = { "neck","ring","trinket","bow","quiver" }
+local EQUIP_POS = {}  -- slot -> {col="L"/"R", idx}
+for i,s in ipairs(SLOTS_L) do EQUIP_POS[s]={col="L",idx=i} end
+for i,s in ipairs(SLOTS_R) do EQUIP_POS[s]={col="R",idx=i} end
 local TIER_PREFIX = { "破旧", "精铁", "精钢", "符文", "巨龙" }
 
 local ATTRS = { "str","agi","sta" }
@@ -812,7 +815,7 @@ local function tt_content(tt)
         local g=tt.g
         return gear_full_name(g), gear_color(g),
             RAR[g.rarity].name.."  ·  "..SLOT_INFO[g.slot].name.."  ·  装等 "..g.ilvl,
-            gear_detail_lines(g), (tt.src=="bag") and "装备" or nil
+            gear_detail_lines(g), (tt.src=="bag") and "装备" or (tt.src=="equip") and "卸下" or nil
     elseif tt.kind=="mat" then
         local lines={ {"持有："..inv_count("mat",tt.id), UI.text}, {MAT_DESC[tt.id] or "", UI.dim} }
         return MAT_NAME[tt.id], MAT_COLOR[tt.id], "材料 · 可堆叠", lines, nil
@@ -849,7 +852,7 @@ local function draw_tooltip()
     local fy = ty+th-sy(40)
     if equip then
         local bw=(tw-sx(40))/2
-        button(tx+sx(14), fy, bw, sy(30), "装备", {0.3,0.6,0.4}, true, font_sm)
+        button(tx+sx(14), fy, bw, sy(30), equip, {0.3,0.6,0.4}, true, font_sm)
         button(tx+sx(26)+bw, fy, bw, sy(30), "关闭", {0.4,0.4,0.5}, true, font_sm)
     else
         button(tx+tw/2-sx(60), fy, sx(120), sy(30), "关闭", {0.4,0.4,0.5}, true, font_sm)
@@ -859,14 +862,19 @@ end
 local function tooltip_press(x,y)
     local tx,ty,tw,th = tt_geom(tooltip)
     local fy = ty+th-sy(40)
-    if tooltip.kind=="gear" and tooltip.src=="bag" then
+    if tooltip.kind=="gear" then
         local bw=(tw-sx(40))/2
-        if x>=tx+sx(14) and x<=tx+sx(14)+bw and y>=fy and y<=fy+sy(30) then
-            -- 从背包格穿戴：清空该格，旧装备回到背包
+        local on_action = x>=tx+sx(14) and x<=tx+sx(14)+bw and y>=fy and y<=fy+sy(30)
+        if on_action and tooltip.src=="bag" then
             local i=tooltip.slot; local g=tooltip.g
             if i and player.inv[i] and player.inv[i].gear==g then player.inv[i]=nil end
             local old=player.equip[g.slot]; player.equip[g.slot]=g; if old then inv_add("gear",nil,1,old) end
             recalc(); tooltip=nil; return
+        elseif on_action and tooltip.src=="equip" then
+            -- 卸下：装备回背包
+            local g=tooltip.g
+            if inv_add("gear",nil,1,g) then player.equip[g.slot]=nil; recalc() end
+            tooltip=nil; return
         end
     end
     tooltip=nil
@@ -874,35 +882,51 @@ end
 
 
 -- 装备面板：角色总览卡 + 11 槽位列表（点击看详情）
+-- 装备格几何（draw 与 press 共用）
+local function equip_cell_rect(slot)
+    local w,h=love.graphics.getWidth(),love.graphics.getHeight()
+    local px,py,pw,ph=sx(16),sy(56),w-sx(32),h-sy(112)
+    local cell=sx(52); local gap=sy(10); local startY=py+sy(48)
+    local p=EQUIP_POS[slot]
+    local x = (p.col=="L") and (px+sx(20)) or (px+pw-sx(20)-cell)
+    local y = startY + (p.idx-1)*(cell+gap)
+    return x,y,cell
+end
+
 local function draw_equip()
     local w,h=love.graphics.getWidth(),love.graphics.getHeight(); love.graphics.setColor(0,0,0,0.72); love.graphics.rectangle("fill",0,0,w,h)
     local px,py,pw,ph=sx(16),sy(56),w-sx(32),h-sy(112); panel(px,py,pw,ph,{0.09,0.1,0.15,0.98},UI.line,10*sw)
     love.graphics.setFont(font_med); setc(UI.text); love.graphics.printf("装备",px,py+sy(8),pw,"center")
-    -- 总览卡
-    local cy=py+sy(40)
-    panel(px+sx(10),cy,pw-sx(20),sy(46),{0.13,0.15,0.22,0.97},UI.line,7*sw)
-    love.graphics.setFont(font_sm)
-    for j,k in ipairs(ATTRS) do setc(ATTR_COLOR[k]); love.graphics.print(ATTR_NAME[k].." "..player[k], px+sx(20)+(j-1)*sx(74), cy+sy(6)) end
-    setc(UI.text); love.graphics.print(string.format("攻击 %d   攻速 %.2f   暴击 %d%%", math.floor(player.attack), player.atk_speed, math.floor(player.crit*100)), px+sx(20), cy+sy(26))
-    setc(UI.dim); love.graphics.printf(string.format("生命 %d  护甲 %d  DPS %d", player.max_hp, player.armor, math.floor(player.dps)), px+sx(20), cy+sy(26), pw-sx(30), "right")
-    -- 槽位列表
-    local ly=cy+sy(54); local rh=sy(38)
-    for i,slot in ipairs(SLOTS) do
-        local y=ly+(i-1)*(rh+sy(3)); local g=player.equip[slot]; local info=SLOT_INFO[slot]
-        local rc = g and gear_color(g) or {0.32,0.33,0.4}
-        panel(px+sx(10),y,pw-sx(20),rh,{0.11,0.12,0.17,0.95},rc,6*sw)
-        setc(rc); love.graphics.rectangle("fill",px+sx(10),y,3*sw,rh,1.5*sw,1.5*sw)
-        icon_kind(info.kind, px+sx(28), y+rh/2, sx(8), rc)
-        setc(UI.dim); love.graphics.setFont(font_sm); love.graphics.print(info.name, px+sx(46), y+sy(3))
+
+    -- 中间角色火柴人
+    local _,fy0,cell = equip_cell_rect("feet")  -- 用左列最后一格的 y 作为脚部参考
+    draw_archer(px+pw/2, fy0+cell, "bow")
+
+    -- 槽位格子（左列防具 / 右列武器首饰）
+    for _,slot in ipairs(SLOTS) do
+        local x,y,c = equip_cell_rect(slot); local g=player.equip[slot]; local info=SLOT_INFO[slot]
+        local rc = g and gear_color(g) or {0.3,0.31,0.38}
+        if g then panel(x,y,c,c,{rc[1]*0.16,rc[2]*0.16,rc[3]*0.18,0.95},rc,6*sw)
+        else panel(x,y,c,c,{0.1,0.11,0.15,0.92},{0.22,0.23,0.3},6*sw) end
         if g then
-            setc(rc); love.graphics.print(gear_full_name(g), px+sx(46), y+sy(19))
-            setc(UI.dim); love.graphics.printf("›", px+sx(46), y+sy(11), pw-sx(40), "right")
+            icon_kind(info.kind, x+c/2, y+c/2-sy(2), c*0.32, rc)
         else
-            setc({0.42,0.42,0.48}); love.graphics.print("空", px+sx(46), y+sy(19))
+            icon_kind(info.kind, x+c/2, y+c/2-sy(4), c*0.3, {0.38,0.39,0.46})
+            setc({0.5,0.51,0.58}); love.graphics.setFont(font_sm); love.graphics.printf(info.name, x, y+c-sy(15), c, "center")
         end
     end
+
+    -- 底部总览卡
+    local cardh=sy(48); local cardy=py+ph-sy(46)-cardh
+    panel(px+sx(10),cardy,pw-sx(20),cardh,{0.13,0.15,0.22,0.97},UI.line,7*sw)
+    love.graphics.setFont(font_sm)
+    for j,k in ipairs(ATTRS) do setc(ATTR_COLOR[k]); love.graphics.print(ATTR_NAME[k].." "..player[k], px+sx(20)+(j-1)*sx(74), cardy+sy(6)) end
+    setc(UI.text); love.graphics.print(string.format("攻击 %d   攻速 %.2f   暴击 %d%%", math.floor(player.attack), player.atk_speed, math.floor(player.crit*100)), px+sx(20), cardy+sy(26))
+    setc(UI.dim); love.graphics.printf(string.format("生命 %d  护甲 %d  DPS %d", player.max_hp, player.armor, math.floor(player.dps)), px+sx(20), cardy+sy(26), pw-sx(30), "right")
+
     button(px+pw/2-sx(60),py+ph-sy(34),sx(120),sy(28),"返回",{0.4,0.4,0.5},true)
 end
+
 
 -- 背包面板：材料 / 箭矢 / 装备 三区，可堆叠 + 图标，点击看说明
 -- 物品图标分发（材料/箭矢/装备）
@@ -1037,10 +1061,9 @@ local function press(x,y)
         if tooltip then tooltip_press(x,y); return end
         local px,py,pw,ph=sx(16),sy(56),w-sx(32),h-sy(112)
         if hit(x,y,px+pw/2-sx(60),py+ph-sy(34),sx(120),sy(28)) then panel_open=nil; return end
-        local cy=py+sy(40); local ly=cy+sy(54); local rh=sy(38)
-        for i,slot in ipairs(SLOTS) do
-            local yy=ly+(i-1)*(rh+sy(3)); local g=player.equip[slot]
-            if g and hit(x,y,px+sx(10),yy,pw-sx(20),rh) then tooltip={ kind="gear", g=g, src="equip" }; return end
+        for _,slot in ipairs(SLOTS) do
+            local ex,ey,ec = equip_cell_rect(slot); local g=player.equip[slot]
+            if g and hit(x,y,ex,ey,ec,ec) then tooltip={ kind="gear", g=g, src="equip", slot=slot }; return end
         end
     elseif panel_open=="bag" then
         if tooltip then tooltip_press(x,y); return end
