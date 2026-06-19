@@ -174,6 +174,30 @@ local function inv_swap(a,b)
     player.inv[a], player.inv[b] = ib, ia
 end
 
+-- ============================================================================
+-- 箭袋弹药槽：箭矢只能放在这里（不进主背包）。槽数由已装备的箭袋决定。
+-- player.ammo = 数组（nil 或 {id=, qty=}），上限 player.ammo_cap 个槽，每槽 200。
+-- ============================================================================
+local function ammo_count(id)
+    local n=0; for i=1,(player.ammo_cap or 0) do local it=player.ammo[i]; if it and it.id==id then n=n+it.qty end end; return n
+end
+local function ammo_add(id,qty)
+    local cap=player.ammo_cap or 0; local ms=200
+    for i=1,cap do local it=player.ammo[i]; if it and it.id==id and it.qty<ms then local put=math.min(ms-it.qty,qty); it.qty=it.qty+put; qty=qty-put; if qty<=0 then return true end end end
+    for i=1,cap do if not player.ammo[i] then local put=math.min(ms,qty); player.ammo[i]={id=id,qty=put}; qty=qty-put; if qty<=0 then return true end end end
+    return qty<=0   -- 装不下的部分丢弃（箭袋满）
+end
+local function ammo_remove(id,n)
+    for i=1,(player.ammo_cap or 0) do local it=player.ammo[i]; if it and it.id==id then
+        local take=math.min(n,it.qty); it.qty=it.qty-take; n=n-take; if it.qty<=0 then player.ammo[i]=nil end
+        if n<=0 then break end end end
+end
+local function ammo_swap(a,b)
+    if a==b then return end
+    local ia,ib=player.ammo[a],player.ammo[b]
+    if ia and ib and ia.id==ib.id then local mv=math.min(200-ib.qty,ia.qty); if mv>0 then ib.qty=ib.qty+mv; ia.qty=ia.qty-mv; if ia.qty<=0 then player.ammo[a]=nil end; return end end
+    player.ammo[a],player.ammo[b]=ib,ia
+end
 
 -- ============================================================================
 -- 装备
@@ -186,6 +210,7 @@ local function roll_gear(slot, ilvl, rarity_id)
         g.stats.weapon_attack = math.max(1, math.floor(budget))
     elseif info.kind == "quiver" then
         g.stats.agi = math.max(1, math.floor(budget))
+        g.ammo_slots = r.tier   -- 弹药槽数 = 稀有度层级（普通=2，越高越多）
     elseif info.kind == "armor" then
         g.stats.sta = math.max(1, math.floor(budget*0.7))
         g.stats.armor = math.max(1, math.floor(budget*0.6))
@@ -231,9 +256,12 @@ local function recalc()
     player.crit      = math.min(0.6, 0.05 + player.agi*0.0004 + (a.crit_pct or 0)*0.01)
     player.max_hp    = 60 + player.sta*6
     if player.hp==nil or player.hp>player.max_hp then player.hp=player.max_hp end
-    -- 当前箭档倍率（用于 DPS 估算与显示）
+    -- 箭袋弹药槽数（无箭袋则 0）
+    player.ammo = player.ammo or {}
+    player.ammo_cap = (player.equip.quiver and player.equip.quiver.ammo_slots) or 0
+    -- 当前箭档倍率（从弹药槽里取最高档）
     player.arrow_mult, player.arrow_tier = 0.5, nil
-    for i=#ARROW_TIERS,1,-1 do if inv_count("arrow",ARROW_TIERS[i].id)>0 then player.arrow_mult=ARROW_TIERS[i].mult; player.arrow_tier=ARROW_TIERS[i]; break end end
+    for i=#ARROW_TIERS,1,-1 do if ammo_count(ARROW_TIERS[i].id)>0 then player.arrow_mult=ARROW_TIERS[i].mult; player.arrow_tier=ARROW_TIERS[i]; break end end
     local cf = 1 + player.crit*(CRIT_MULT-1)
     player.dps = player.attack * player.arrow_mult * cf * player.atk_speed
 end
@@ -265,7 +293,7 @@ end
 local function craft(tier)
     if not can_craft(tier) then return end
     for m,n in pairs(tier.cost) do inv_remove("mat",m,n) end
-    inv_add("arrow",tier.id,ARROW_BATCH)
+    ammo_add(tier.id,ARROW_BATCH)
     recalc()
 end
 
@@ -359,7 +387,7 @@ local CB_ENEMY_Y = DESIGN_H*0.42-12                   -- 敌人身体中心
 local function archer_fire()
     -- 取最高可用箭档，消耗 1 支；无箭则简易箭(0.5x)
     local mult, tier = 0.5, nil
-    for i=#ARROW_TIERS,1,-1 do local id=ARROW_TIERS[i].id; if inv_count("arrow",id)>0 then mult=ARROW_TIERS[i].mult; tier=ARROW_TIERS[i]; inv_remove("arrow",id,1); break end end
+    for i=#ARROW_TIERS,1,-1 do local id=ARROW_TIERS[i].id; if ammo_count(id)>0 then mult=ARROW_TIERS[i].mult; tier=ARROW_TIERS[i]; ammo_remove(id,1); break end end
     if tier==nil then recalc() end
     local crit = math.random()<player.crit
     local raw = player.attack*mult*(crit and CRIT_MULT or 1)
@@ -419,15 +447,16 @@ end
 -- ============================================================================
 local function init()
     player = { level=1, xp=0, xp_next=xp_need(1), base_str=5, base_agi=5, base_sta=5,
-        gold=0, hp=nil, equip={}, inv={}, atb=0,
+        gold=0, hp=nil, equip={}, inv={}, ammo={}, ammo_cap=0, atb=0,
         skill={ woodcut=1, mining=1, herb=1, fletch=1 },
         acc=0, fletch_prog=0, fletch_target=nil, fletch_blueprint="wood" }
-    -- 初始物品入格
-    inv_add("mat","wood",8); inv_add("mat","ore",4); inv_add("mat","herb",2); inv_add("arrow","wood",30)
-    -- 初始装备：灰色弓 + 普通(白)箭袋
+    -- 初始装备：灰色弓 + 普通(白)箭袋（先装好箭袋，弹药槽才存在）
     player.equip.bow = roll_gear("bow", 1, "poor")
     player.equip.quiver = roll_gear("quiver", 1, "common")
-    recalc(); player.hp=player.max_hp
+    recalc()
+    -- 初始物品：材料入背包，箭矢入箭袋
+    inv_add("mat","wood",8); inv_add("mat","ore",4); inv_add("mat","herb",2); ammo_add("wood",30)
+    player.hp=player.max_hp
     region=REGIONS[1]; stage=0; floats={}; particles={}; projectile=nil; result_banner=nil; toast=nil
     activity="rest"; panel_open=nil; enemy=nil
 end
@@ -635,7 +664,7 @@ local function draw_fletch()
     if tier and can_craft(tier) then
         -- 正在制造：大箭图标(档色) + 库存 + 进度
         icon_arrow(cx-sx(34), py-sy(116), sx(20), tier.color)
-        love.graphics.setFont(font_big); setc(tier.color); love.graphics.print(inv_count("arrow",tier.id), cx+sx(2), py-sy(130))
+        love.graphics.setFont(font_big); setc(tier.color); love.graphics.print(ammo_count(tier.id), cx+sx(2), py-sy(130))
         love.graphics.setFont(font_sm); setc(UI.dim); love.graphics.printf("正在制造 "..tier.name, 0, py-sy(140), love.graphics.getWidth(), "center")
         bar(cx-sx(100), py-sy(84), sx(200), sy(14), player.fletch_prog or 0, tier.color)
     else
@@ -689,7 +718,7 @@ local function draw_hud()
     -- 右：金币图标+数、箭矢图标(档色)+数
     icon_coin(w-sx(120), sy(15), sx(8)); setc(UI.gold); love.graphics.setFont(font_sm); love.graphics.print(player.gold, w-sx(108), sy(9))
     local acol = player.arrow_tier and player.arrow_tier.color or {0.5,0.3,0.3}
-    local acnt = player.arrow_tier and inv_count("arrow",player.arrow_tier.id) or 0
+    local acnt = player.arrow_tier and ammo_count(player.arrow_tier.id) or 0
     icon_arrow(w-sx(56), sy(15), sx(11), acol); setc(acol); love.graphics.print(acnt, w-sx(38), sy(9))
     if toast then love.graphics.setFont(font_sm); setc(toast.color,math.min(1,toast.timer)); love.graphics.printf(toast.text,0,sy(50),w-sx(10),"right") end
 end
@@ -831,7 +860,7 @@ local function tt_content(tt)
         return MAT_NAME[tt.id], MAT_COLOR[tt.id], "材料 · 可堆叠", lines, nil
     else -- arrow
         local t; for _,a in ipairs(ARROW_TIERS) do if a.id==tt.id then t=a end end
-        local lines={ {"持有："..inv_count("arrow",tt.id).." 支", UI.text}, {arrow_desc(t), UI.dim} }
+        local lines={ {"持有："..ammo_count(tt.id).." 支", UI.text}, {arrow_desc(t), UI.dim} }
         -- 配方
         local parts={}; for m,n in pairs(t.cost) do parts[#parts+1]=MAT_NAME[m].."x"..n end
         lines[#lines+1]={ "配方："..table.concat(parts,"  "), {0.6,0.7,0.85} }
@@ -952,6 +981,14 @@ local function draw_item_icon(it, cx, cy, s)
     else icon_kind(SLOT_INFO[it.gear.slot].kind, cx, cy, s, gear_color(it.gear)) end
 end
 
+-- 箭袋弹药格几何（一行，cap 个格）
+local function ammo_grid()
+    local w,h=love.graphics.getWidth(),love.graphics.getHeight()
+    local px,py,pw,ph=sx(16),sy(56),w-sx(32),h-sy(112)
+    local cell=sx(40); local gap=sx(6); local ax=px+sx(14); local ay=py+sy(56)
+    return ax,ay,cell,gap
+end
+
 -- 背包网格几何（draw 与 press/drag 共用）
 local BAG_COLS = 6
 local function bag_grid()
@@ -959,7 +996,7 @@ local function bag_grid()
     local px,py,pw,ph=sx(16),sy(56),w-sx(32),h-sy(112)
     local gap=sx(6)
     local rows=math.ceil(BAG_SLOTS/BAG_COLS)
-    local gy0=py+sy(40)                       -- 标题下
+    local gy0=py+sy(124)                      -- 标题 + 箭袋行 之下
     local bottom=py+ph-sy(48)                 -- 返回按钮上方留白
     local cw=(pw-sx(20)-gap*(BAG_COLS-1))/BAG_COLS
     local chh=(bottom-gy0-gap*(rows-1))/rows
@@ -978,15 +1015,31 @@ local function draw_bag()
     local w,h=love.graphics.getWidth(),love.graphics.getHeight(); love.graphics.setColor(0,0,0,0.72); love.graphics.rectangle("fill",0,0,w,h)
     local px,py,pw,ph,gx,gy,cell,gap = bag_grid(); panel(px,py,pw,ph,{0.09,0.1,0.15,0.98},UI.line,10*sw)
     love.graphics.setFont(font_med); setc(UI.text); love.graphics.printf("背包",px,py+sy(8),pw,"center")
-    -- 已用格数
+
+    -- 箭袋区（弹药格，仅箭矢）
+    setc(UI.dim); love.graphics.setFont(font_sm)
+    love.graphics.print("箭袋（仅箭矢）", px+sx(14), py+sy(38))
+    local ax,ay,acell,agap = ammo_grid()
+    for i=1,(player.ammo_cap or 0) do
+        local x=ax+(i-1)*(acell+agap)
+        local it=player.ammo[i]
+        local bc = it and item_color({kind="arrow",id=it.id}) or {0.3,0.31,0.4}
+        if it then panel(x,ay,acell,acell,{bc[1]*0.16,bc[2]*0.16,bc[3]*0.18,0.95},bc,6*sw)
+        else panel(x,ay,acell,acell,{0.1,0.11,0.15,0.9},{0.22,0.23,0.3},6*sw) end
+        if it and not (drag and drag.moved and drag.from=="ammo" and drag.slot==i) then
+            local t; for _,a in ipairs(ARROW_TIERS) do if a.id==it.id then t=a end end
+            icon_arrow(x+acell/2, ay+acell/2-sy(2), acell*0.3, t and t.color)
+            setc(UI.text); love.graphics.printf(it.qty, x, ay+acell-sy(14), acell-sx(2), "right")
+        end
+    end
+
+    -- 主背包格（材料/装备）
     local used=0; for i=1,BAG_SLOTS do if player.inv[i] then used=used+1 end end
-    love.graphics.setFont(font_sm); setc(UI.dim); love.graphics.printf(used.."/"..BAG_SLOTS, px, py+sy(12), pw-sx(14), "right")
-    -- 格子
+    setc(UI.dim); love.graphics.setFont(font_sm); love.graphics.printf("背包  "..used.."/"..BAG_SLOTS, px, py+sy(102), pw-sx(14), "right")
     for i=1,BAG_SLOTS do
         local x,y=bag_cell_rect(i,gx,gy,cell,gap)
         local it=player.inv[i]
         local border = it and item_color(it) or {0.22,0.23,0.3}
-        -- 空格暗底；有物品时品质淡染背景 + 品质边框
         if it then panel(x,y,cell,cell,{border[1]*0.16,border[2]*0.16,border[3]*0.18,0.95},border,6*sw)
         else panel(x,y,cell,cell,{0.1,0.11,0.15,0.9},{0.2,0.21,0.27},6*sw) end
         if it and not (drag and drag.moved and drag.from=="bag" and drag.slot==i) then
@@ -1018,9 +1071,11 @@ function love.draw()
     -- 拖拽中的物品跟随指针（超过阈值才显示）
     if drag and drag.moved and drag.item then
         local _,_,_,_,_,_,cell = bag_grid()
-        local it=drag.item; local c=item_color(it)
+        local it=drag.item
+        local norm = (drag.from=="ammo") and {kind="arrow",id=it.id,qty=it.qty} or it
+        local c=item_color(norm)
         setc(c,0.85); rrect("fill", drag.x-cell/2, drag.y-cell/2, cell, cell, 6*sw)
-        draw_item_icon(it, drag.x, drag.y-sy(2), cell*0.3)
+        draw_item_icon(norm, drag.x, drag.y-sy(2), cell*0.3)
         if it.qty>1 then setc(UI.text); love.graphics.setFont(font_sm); love.graphics.printf(it.qty, drag.x-cell/2, drag.y+cell/2-sy(16), cell-sx(4), "right") end
     end
     if result_banner=="defeat" then
@@ -1079,7 +1134,15 @@ local function press(x,y)
         if tooltip then tooltip_press(x,y); return end
         local px,py,pw,ph,gx,gy,cell,gap = bag_grid()
         if hit(x,y,px+pw/2-sx(60),py+ph-sy(34),sx(120),sy(28)) then panel_open=nil; return end
-        -- 命中某格 → 开始拖拽（松手再决定 点开tooltip / 交换 / 装备）
+        -- 箭袋弹药格 → 拾起
+        local ax,ay,acell,agap = ammo_grid()
+        for i=1,(player.ammo_cap or 0) do
+            local cx=ax+(i-1)*(acell+agap)
+            if hit(x,y,cx,ay,acell,acell) and player.ammo[i] then
+                drag={ from="ammo", slot=i, item=player.ammo[i], x=x, y=y, sx0=x, sy0=y, moved=false }; return
+            end
+        end
+        -- 主背包格 → 拾起
         for i=1,BAG_SLOTS do
             local cx,cyy=bag_cell_rect(i,gx,gy,cell,gap)
             if hit(x,y,cx,cyy,cell,cell) and player.inv[i] then
@@ -1089,24 +1152,28 @@ local function press(x,y)
     end
 end
 
--- 拖拽放下：根据落点处理 交换 / 装备 / 点击看详情
+-- 拖拽放下：bag↔bag、ammo↔ammo 内部交换/堆叠；跨类拒绝；未移动=点击看详情
 local function drag_release(x,y)
     if not drag then return end
     local d=drag; drag=nil
     local px,py,pw,ph,gx,gy,cell,gap = bag_grid()
-    -- 落在某格
-    local target=nil
-    for i=1,BAG_SLOTS do local cx,cyy=bag_cell_rect(i,gx,gy,cell,gap); if hit(x,y,cx,cyy,cell,cell) then target=i; break end end
-    if not d.moved and target==d.slot then
-        -- 视为点击 → 弹详情
-        local it=player.inv[d.slot]
-        if it then
-            if it.kind=="gear" then tooltip={ kind="gear", g=it.gear, src="bag", slot=d.slot }
-            else tooltip={ kind=it.kind, id=it.id } end
+    local ax,ay,acell,agap = ammo_grid()
+    -- 找落点（先箭袋后主背包）
+    local tgrid,tslot=nil,nil
+    for i=1,(player.ammo_cap or 0) do local cx=ax+(i-1)*(acell+agap); if hit(x,y,cx,ay,acell,acell) then tgrid="ammo"; tslot=i; break end end
+    if not tgrid then for i=1,BAG_SLOTS do local cx,cyy=bag_cell_rect(i,gx,gy,cell,gap); if hit(x,y,cx,cyy,cell,cell) then tgrid="bag"; tslot=i; break end end end
+    -- 未移动且落回原格 → 点击看详情
+    if not d.moved and tgrid==d.from and tslot==d.slot then
+        if d.from=="ammo" then local it=player.ammo[d.slot]; if it then tooltip={kind="arrow",id=it.id} end
+        else local it=player.inv[d.slot]; if it then
+            if it.kind=="gear" then tooltip={ kind="gear", g=it.gear, src="bag", slot=d.slot } else tooltip={ kind=it.kind, id=it.id } end end
         end
         return
     end
-    if target then inv_swap(d.slot, target) end
+    -- 同类网格内移动/交换；跨网格(箭矢↔背包)拒绝
+    if tgrid and tgrid==d.from then
+        if d.from=="ammo" then ammo_swap(d.slot,tslot) else inv_swap(d.slot,tslot) end
+    end
 end
 
 -- 拖拽位移阈值：超过才算"拖动"，否则松手算"点击"
