@@ -52,6 +52,28 @@ M.skeleton={ pal={O={0.2,0.2,0.18},b={0.86,0.86,0.8},h={0.96,0.96,0.92},e={0.9,0
  rows={"...OOOO...","..ObbbbO..",".ObheehbO.",".ObhhhhbO.","..ObbbbO..","...ObO.O..","O.ObbbbO.O","OObbbbbbOO",".O.ObbO.O.","...O..O...","..OO..OO.."} }
 M.beetle={ pal={O={0.10,0.12,0.08},b={0.30,0.50,0.24},h={0.46,0.7,0.34},e={0.95,0.8,0.2},d={0.18,0.32,0.14}},
  rows={"..O.OO.O..",".ObOOOObO.","O.ObhhbO.O","OObhhhhbOO","ObhdhhdhbO","ObhhhhhhbO","ObheehbO..","OObhhhhbOO",".O.OOOO.O.","..O....O.."} }
+-- ── P1 补全敌型（沿用 O=描边 + 暮色全彩 + 一条高光的同款风格）──
+-- 强盗：兜帽人形，露出眼缝 + 短刀，暮色棕革。
+M.bandit={ pal={O={0.10,0.08,0.10},b={0.46,0.34,0.22},h={0.6,0.46,0.30},k={0.55,0.4,0.5},e={0.95,0.8,0.3},s={0.78,0.8,0.85}},
+ rows={"...OOOOO...","..OkkkkkO..",".OkkkkkkkO.",".OkbbbbbkO.",".ObeOObebO.",".ObhhhhhbO.","OsObbbbbObO","sOObbbbbbO.",".ObbObbbbO.",".OO.O.OOO..","..O...O...."} }
+-- 石像鬼：构造翼魔，灰岩 + 角 + 展翅，冷青眼。
+M.gargoyle={ pal={O={0.10,0.11,0.13},b={0.42,0.44,0.50},h={0.56,0.58,0.64},d={0.28,0.30,0.36},e={0.5,0.85,0.95},w={0.34,0.36,0.42}},
+ rows={"wO...OOO...Ow","wwOOObbbOOOww","wbOOhhhhhOObw","wOhbeehheebOw","wObhhhhhhhbOw",".OObhhhhhbOO.",".OOdhhhhhdOO.",".OOhhOhhhOhO.",".OOdhhhhhdOO.","..OhO...OhO..","..OO.....OO.."} }
+-- 冰狼：冷蓝犬，霜毛 + 寒气眼，与 wolf 同骨不同色。
+M.icewolf={ pal={O={0.12,0.16,0.22},b={0.50,0.70,0.85},h={0.70,0.88,0.98},d={0.34,0.50,0.66},e={0.6,0.95,1.0},f={0.92,0.98,1.0}},
+ rows={"O.O.........","OhO.OOOO....","OhhOffffO...","OdhhhhhhhO.OO",".OhhhhhhhhhhO",".OhhhffhhhdO.","OebhhhhhhbO..",".OffhhhhffO..","..O.OO.OO.O..","..O.OO.OO...."} }
+-- 熔岩兽：元素，黑岩躯壳 + 炽红裂缝 + 余烬。
+M.lava={ pal={O={0.08,0.05,0.05},b={0.24,0.16,0.14},h={0.36,0.22,0.18},c={0.98,0.55,0.18},e={1.0,0.85,0.35},m={0.95,0.35,0.12}},
+ rows={"...OOOOOO...","..ObbbcbbO..",".ObbcbbcbbO.","ObbbbccbbbbO","ObceObbObecO","ObbbccbcbbbO","ObmbbccbbmbO","ObbbcbbbcbbO","ObcbbbbbbcbO",".OmbbccbbmO.","..OcOOOOcO..","...O....O..."} }
+-- 霜魔：元素精怪，冰晶体 + 冷白核 + 棱角。
+M.frost={ pal={O={0.16,0.22,0.32},b={0.42,0.62,0.82},h={0.66,0.86,0.98},c={0.88,0.96,1.0},e={0.55,0.9,1.0}},
+ rows={"....OO....",".O.OhhO.O.","OhOhcchOhO",".OhhcchhO.","OhhceechhO","OhhccccchO",".OhhcchhO.","OhO.Ohh.OO","..OhhhhO..",".O.O..O.O.","..O....O.."} }
+-- 虚空兽：紫黑兽影，发光独眼 + 漂浮残体。
+M.voidcat={ pal={O={0.06,0.04,0.10},b={0.30,0.18,0.42},h={0.46,0.30,0.60},e={0.75,0.5,1.0},v={0.55,0.35,0.85},s={0.85,0.65,1.0}},
+ rows={"O.O......O.O",".OvO....OvO.","OhhO.OO.OhhO",".OhhObbOhhO.","OhhbbbbbbhhO","ObbbsssbbbbO","ObbsseeesbbO","ObbbsssbbbbO",".ObbbbbbbbO.","..O.OvvO.O..","...O.OO.O..."} }
+-- 幼龙：chibi 小龙(沿用 dragon 那版配色，体型更小更圆)。
+M.drake={ pal={O={0.28,0.10,0.10},h={0.82,0.36,0.30},e={0.98,0.85,0.32},w={0.52,0.20,0.18},b={0.95,0.6,0.3}},
+ rows={"..O....O..",".OhO..OhO.",".OhhOOhhO.","OwhhhhhhwO","OheebbeehO","OwhhbbhhwO",".OhhhhhhO.","OwOhhhhOwO",".OOhhhhOO.","..OObbOO..","...O..O..."} }
 sprites.M = M
 
 -- 画一个怪物精灵，自动居中到 (cx,cy)（cx,cy 为场景像素坐标，sc 整数放大，flip 翻面）。

@@ -516,21 +516,25 @@ end
 --   armor_mul：family 级护甲倍率(construct 高甲 ×1.3，逼穿甲/弩)。
 --   drops：family 偏向掉落(本期登记，combat.drop_loot 取部分接上)。
 -- ============================================================================
--- 怪物像素精灵映射：arch_id/family → view/sprites 里的精灵名（可用：slime/bat/boar/wolf/
--- ghost/golem/ogre/dragon/skeleton/beetle）。对不上的临时用 slime 占位(P1 补全)。
+-- 怪物像素精灵映射：arch_id/family → view/sprites 里的精灵名。
+-- 精灵全集：slime/bat/boar/wolf/ghost/golem/ogre/dragon/skeleton/beetle
+--   + P1 补全：bandit/gargoyle/icewolf/lava/frost/voidcat/drake。
+-- 每个敌型尽量有专属精灵；对不上的按 family 兜底（ENEMY_SPRITE_FAMILY）。
 D.ENEMY_SPRITE = {
-    boar="boar", wolf="wolf", icewolf="wolf", bandit="ogre", ogre="ogre",
+    -- 普通敌型：各自专属
+    boar="boar", wolf="wolf", icewolf="icewolf", bandit="bandit", ogre="ogre",
     wraith="ghost", lich="skeleton", revenant="skeleton",
-    golem="golem", gargoyle="golem",
+    golem="golem", gargoyle="gargoyle",
     bug="beetle", bat="bat",
-    lava="slime", frost="slime", voidcat="bat", drake="dragon",
+    lava="lava", frost="frost", voidcat="voidcat", drake="drake",
+    -- 副本 boss：取同家族最贴近的精灵（combat 用 rank/scale 放大区分体型）
     alpha_wolf="wolf", bog_horror="ghost", stone_lord="golem",
-    frost_queen="ghost", lava_tyrant="dragon", void_warden="ghost", throne_king="dragon",
+    frost_queen="frost", lava_tyrant="lava", void_warden="voidcat", throne_king="dragon",
 }
--- 家族兜底（arch_id 未列时按 family 选）
+-- 家族兜底（arch_id 未列时按 family 选最贴近的专属精灵）
 D.ENEMY_SPRITE_FAMILY = {
-    beast="wolf", humanoid="ogre", undead="skeleton", construct="golem",
-    elemental="slime", dragon="dragon", void="bat",
+    beast="wolf", humanoid="bandit", undead="skeleton", construct="golem",
+    elemental="lava", dragon="drake", void="voidcat",
 }
 
 D.ENEMY_FAMILY = {
