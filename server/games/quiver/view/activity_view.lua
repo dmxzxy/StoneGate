@@ -1,6 +1,6 @@
 -- ============================================================================
 -- view/activity_view —— 活动面板：按 ACT_GROUPS 分组(挂机>战斗>副职业)的活动选择列表。
--- 提供 draw()、hit(x,y)->handled（返回键 / 加速按钮 / 切活动）、act_layout()/act_base()（几何，共用）。
+-- 提供 draw()、hit(x,y)->handled（点抽屉外/X 收起 / 切活动）、act_layout()/act_base()（几何，共用）。
 -- 依赖：base/screen + base/draw + core/state + sys/progression + sys/combat(next_enemy) + data。
 -- ============================================================================
 local screen = require("base.screen")
@@ -17,8 +17,8 @@ local function sx(v) return v*screen.sw end
 local function sy(v) return v*screen.sh end
 local function hit(x,y,rx,ry,rw,rh) return x>=rx and x<=rx+rw and y>=ry and y<=ry+rh end
 local setc = draw.setc
-local panel, button, bar, rrect = draw.panel, draw.button, draw.bar, draw.rrect
-local gather_need, craft_need, skill_cost, upgrade_skill = prog.gather_need, prog.craft_need, prog.skill_cost, prog.upgrade_skill
+local panel, bar, rrect = draw.panel, draw.bar, draw.rrect
+local gather_need, craft_need = prog.gather_need, prog.craft_need
 local next_enemy = combat.next_enemy
 
 local activity_view = {}
@@ -80,14 +80,10 @@ function activity_view.draw()
             if a.kind=="gather" then
                 local s=state.player.skill[id]
                 love.graphics.print(string.format("Lv %d   寻找采集 %s", s.lvl, MAT_NAME[a.mat]), px+sx(44), yy+sy(28))
-                bar(px+sx(44), yy+sy(44), sx(150), sy(6), s.xp/gather_need(s.lvl), MAT_COLOR[a.mat])
-                local c=skill_cost(s.lvl); local ok=state.player.gold>=c
-                button(px+pw-sx(90), yy+sy(13), sx(80), sy(30), "加速 "..c, ok and {0.3,0.6,0.5} or UI.btn, ok, draw.font_sm)
+                bar(px+sx(44), yy+sy(44), pw-sx(58), sy(6), s.xp/gather_need(s.lvl), MAT_COLOR[a.mat])
             elseif a.kind=="craft" then
                 love.graphics.print(string.format("Lv %d   做工攒经验解锁图谱", state.player.craft.lvl), px+sx(44), yy+sy(28))
-                bar(px+sx(44), yy+sy(44), sx(150), sy(6), state.player.craft.xp/craft_need(state.player.craft.lvl), {0.7,0.6,0.4})
-                local c=skill_cost(state.player.craft.lvl); local ok=state.player.gold>=c
-                button(px+pw-sx(90), yy+sy(13), sx(80), sy(30), "加速 "..c, ok and {0.3,0.6,0.5} or UI.btn, ok, draw.font_sm)
+                bar(px+sx(44), yy+sy(44), pw-sx(58), sy(6), state.player.craft.xp/craft_need(state.player.craft.lvl), {0.7,0.6,0.4})
             elseif a.kind=="combat" then
                 love.graphics.print(state.region.name.."   技能轮转 · 消耗箭矢", px+sx(44), yy+sy(30))
             else
@@ -105,9 +101,6 @@ function activity_view.hit(x,y)
     for _,e in ipairs(act_layout()) do
         if e.kind=="act" then
             local id=e.id; local a=ACTIVITIES[id]; local yy=base+e.y
-            if (a.kind=="gather" or a.kind=="craft") and hit(x,y,px+pw-sx(90),yy+sy(13),sx(80),sy(30)) then
-                upgrade_skill(a.kind=="craft" and "craft" or id); return true
-            end
             if hit(x,y,px+sx(10),yy,pw-sx(20),e.h) then
                 state.activity=id; state.player.craft_prog=0; state.player.gather_node=nil
                 if id=="combat" and not state.enemy then next_enemy() end

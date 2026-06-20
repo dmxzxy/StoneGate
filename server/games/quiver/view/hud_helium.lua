@@ -110,11 +110,9 @@ end
 -- ----------------------------------------------------------------------------
 local function draw_bottombar()
     local w,h = love.graphics.getWidth(), love.graphics.getHeight()
-    -- 活动胶囊：层级色点 + "当前：xxx"
-    local a=ACTIVITIES[state.activity]; local gc=group_color(a.group)
-    setc(gc); love.graphics.circle("fill", w/2-sx(40), h-sy(62), sx(4))
-    love.graphics.setFont(draw.font_sm); setc(a.group=="idle" and UI.dim or UI.good)
-    love.graphics.printf("当前："..a.name, sx(20), h-sy(68), w-sx(40), "center")
+    -- 角色经验条（替代原"当前：xxx"状态行）：等级 + 经验进度，醒目可见
+    local p = state.player
+    bar(sx(40), h-sy(68), w-sx(80), sy(12), p.xp/p.xp_next, UI.xp, "Lv "..p.level.."   经验 "..math.floor(p.xp).."/"..p.xp_next)
     -- 五入口
     local rects = btn_rects()
     for i,r in ipairs(rects) do
