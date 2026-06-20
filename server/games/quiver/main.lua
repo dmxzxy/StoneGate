@@ -133,7 +133,7 @@ end
 -- 收进单个 save 表（避免主 chunk 触及 Lua 200 局部变量上限；文件拆分后会移到 base/save.lua）
 local save = {}
 save.FILE = "quiver/save.lua"
-save.VERSION = 2
+save.VERSION = 3
 local save_timer = 0
 
 -- 序列化一个纯数据值（数字/字符串/布尔/表）到 out 数组
@@ -200,6 +200,22 @@ function save.migrate(data)
             end
         end
         data.version = 2
+    end
+    -- v2→v3：武器类型(C2)。旧武器 gear 无 wtype/crit_innate → 补 longbow/0(均衡型，不破坏数值)。
+    --   遍历 equip(取 weapon 类槽) 与 inv(kind=="gear")，给缺字段的武器补默认；命名/签名旧档没有，留空即可。
+    if v < 3 then
+        local function backfill_weapon(g)
+            if type(g)~="table" or not g.stats then return end
+            if g.stats.wmin then   -- 有攻击区间 = 武器
+                if not g.wtype then g.wtype = "longbow" end
+                if g.stats.crit_innate==nil then g.stats.crit_innate = 0 end
+            end
+        end
+        if type(data.equip)=="table" then for _,g in pairs(data.equip) do backfill_weapon(g) end end
+        if type(data.inv)=="table" then for _,it in pairs(data.inv) do
+            if type(it)=="table" and it.kind=="gear" then backfill_weapon(it.gear) end
+        end end
+        data.version = 3
     end
     return data
 end

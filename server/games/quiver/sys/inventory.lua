@@ -19,6 +19,9 @@ local BAG_SLOTS = D.BAG_SLOTS
 local GEAR_BUDGET = D.GEAR_BUDGET
 local WEAPON_DPS_K = D.WEAPON_DPS_K
 local WEAPON_SPEED_DEFAULT = D.WEAPON_SPEED_DEFAULT
+local WEAPON_TYPES = D.WEAPON_TYPES
+local WEAPON_TYPE_ORDER = D.WEAPON_TYPE_ORDER
+local NAMED_WEAPONS = D.NAMED_WEAPONS
 
 local inv = {}
 
@@ -88,17 +91,28 @@ function inv.ammo_swap(a,b)
 end
 
 -- ---- 装备掉落/属性聚合/评分 ----
-function inv.roll_gear(slot, ilvl, rarity_id)
+-- 类型偏向：地区可给 weapon_bias(wtype)，否则均匀随机选三类型之一
+function inv.pick_wtype(bias)
+    if bias and WEAPON_TYPES[bias] then return bias end
+    return WEAPON_TYPE_ORDER[math.random(#WEAPON_TYPE_ORDER)]
+end
+
+function inv.roll_gear(slot, ilvl, rarity_id, opts)
+    opts = opts or {}
     local info = SLOT_INFO[slot]; local r = RAR[rarity_id]
     local budget = GEAR_BUDGET * ilvl * r.mult * info.w
     local g = { slot=slot, ilvl=ilvl, rarity=rarity_id, stats={}, affixes={} }
     if info.kind == "weapon" then
-        -- 武器两条基础属性：攻击力区间 + 攻速。慢弓伤害高、快弓伤害低，wmid*wspeed 守恒到 budget*WEAPON_DPS_K
-        local wspeed = 0.45 + math.random()*0.20          -- 0.45~0.65 次/秒
+        -- 选武器类型(地区偏向或随机) → 攻速带内随机 → wmid 守恒到 budget*WEAPON_DPS_K → 内置暴击
+        local wt = WEAPON_TYPES[opts.wtype] and opts.wtype or inv.pick_wtype(opts.wbias)
+        local def = WEAPON_TYPES[wt]
+        local wspeed = def.spd[1] + math.random()*(def.spd[2]-def.spd[1])
         local wmid   = budget * WEAPON_DPS_K / wspeed
+        g.wtype        = wt
         g.stats.wmin   = math.max(1, math.floor(wmid*0.85))
         g.stats.wmax   = math.max(g.stats.wmin+1, math.floor(wmid*1.15))
         g.stats.wspeed = wspeed
+        g.stats.crit_innate = def.crit            -- 内置暴击修正(recalc 计入)
     elseif info.kind == "quiver" then
         g.stats.agi = math.max(1, math.floor(budget))
         g.ammo_slots = r.tier   -- 弹药槽数 = 稀有度层级（普通=2，越高越多）
@@ -109,7 +123,30 @@ function inv.roll_gear(slot, ilvl, rarity_id)
         local a = ATTRS[math.random(#ATTRS)]
         g.stats[a] = math.max(1, math.floor(budget))
     end
-    g.name = TIER_PREFIX[math.min(#TIER_PREFIX, 1+math.floor(ilvl/8))] .. info.name
+    -- 命名：武器分蓝(精良)上下两条线。
+    --   白绿(poor/common/uncommon)：程序名 = 品质 + 材料前缀 + 类型名(如「优秀 精铁短弓」)。
+    --   蓝+(rare/epic/legendary)：从 NAMED_WEAPONS 匹配类型/ilvl 抽唯一名 + 签名特效。
+    local matprefix = TIER_PREFIX[math.min(#TIER_PREFIX, 1+math.floor(ilvl/8))]
+    if info.kind=="weapon" then
+        local def = WEAPON_TYPES[g.wtype]
+        if r.tier >= RAR.rare.tier then
+            -- 抽一个类型匹配且 ilvl 够的命名武器
+            local cand = {}
+            for _,nw in ipairs(NAMED_WEAPONS) do
+                if nw.wtype==g.wtype and ilvl >= nw.min_ilvl then cand[#cand+1]=nw end
+            end
+            if #cand>0 then
+                local nw = cand[math.random(#cand)]
+                g.named = true; g.name = nw.name; g.flavor = nw.flavor; g.sig = {}
+                for k,v in pairs(nw.sig) do g.sig[k]=v end
+                -- 签名 crit 叠到内置暴击(recalc 走 crit_innate)
+                if g.sig.crit then g.stats.crit_innate = (g.stats.crit_innate or 0) + g.sig.crit end
+            end
+        end
+        if not g.named then g.name = matprefix .. def.name end   -- 白绿(或命名池空)走程序名
+    else
+        g.name = matprefix .. info.name
+    end
     local pool = {}; for _,a in ipairs(AFFIXES) do pool[#pool+1]=a end
     for _=1, r.affixes do
         if #pool==0 then break end
@@ -131,8 +168,24 @@ function inv.gear_score(g)
     local a={}; inv.add_gear_stats(g,a)
     local wscore = a.wmin and ((a.wmin+a.wmax)/2*(a.wspeed or WEAPON_SPEED_DEFAULT)*3.6) or 0  -- 武器按 DPS 比较
     return wscore +(a.str or 0)+(a.agi or 0)+(a.sta or 0)*0.8+(a.armor or 0)*0.5+(a.crit_pct or 0)*4
+        +(a.crit_innate or 0)*400   -- 内置/签名暴击(0~0.18)折算成可比分(0.06→24)
 end
 function inv.gear_color(g) return RAR[g.rarity].color end
 function inv.gear_full_name(g) return RAR[g.rarity].name.." "..g.name end
+
+-- 签名特效逐行描述（tooltip 用）：返回 {text,...} 列表
+function inv.gear_sig_lines(g)
+    if not (g.sig and next(g.sig)) then return nil end
+    local DESC = D.WEAPON_SIG_DESC
+    local out = {}
+    for k,v in pairs(g.sig) do
+        local d = DESC[k]
+        if d then
+            local pct = (type(v)=="number") and (" +"..math.floor(v*100+0.5).."%") or ""
+            out[#out+1] = "◆ "..d..pct
+        end
+    end
+    return out
+end
 
 return inv

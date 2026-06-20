@@ -38,7 +38,14 @@ function prog.recalc()
     state.player.atk_mid = (state.player.atk_min + state.player.atk_max)/2
     state.player.attack  = state.player.atk_mid                       -- 兼容旧引用/兜底
     state.player.atk_speed = state.player.wspeed * (1 + state.player.agi*0.006)   -- 武器攻速 × 敏捷加成
-    state.player.crit      = math.min(0.6, 0.05 + state.player.agi*0.0004 + (a.crit_pct or 0)*0.01)
+    -- 武器签名 haste：累加各装备 sig.haste(实践只武器有)，乘进攻速
+    local sig_haste = 0
+    for _,slot in ipairs(SLOTS) do local g=state.player.equip[slot]
+        if g and g.sig and g.sig.haste then sig_haste = sig_haste + (type(g.sig.haste)=="number" and g.sig.haste or 0.08) end
+    end
+    if sig_haste>0 then state.player.atk_speed = state.player.atk_speed * (1 + sig_haste) end
+    -- 暴击 = 基础 + 敏捷 + 词缀暴击 + 武器内置/签名暴击(crit_innate)
+    state.player.crit      = math.min(0.6, 0.05 + state.player.agi*0.0004 + (a.crit_pct or 0)*0.01 + (a.crit_innate or 0))
     state.player.max_hp    = 60 + state.player.sta*6
     if state.player.hp==nil or state.player.hp>state.player.max_hp then state.player.hp=state.player.max_hp end
     -- 法力：独立池，随等级长（不占用基础属性）

@@ -95,10 +95,19 @@ function combat.do_shot(mult, opts)
     local crit = math.random()<state.player.crit
     local base = state.player.atk_min + math.random()*(state.player.atk_max-state.player.atk_min)   -- 攻击力区间内随机
     local raw = base*m*mult*(crit and CRIT_MULT or 1)
-    local dmg = math.max(1, raw*(1-combat.mitigation(state.enemy.armor)))
+    -- 武器签名特效：armor_pierce 命中无视部分护甲；bleed_on_hit 命中挂物理流血(无视护甲)
+    local wsig = (state.player.equip.bow and state.player.equip.bow.sig) or nil
+    local eff_armor = state.enemy.armor
+    if wsig and wsig.armor_pierce then eff_armor = eff_armor * (1 - wsig.armor_pierce) end
+    local dmg = math.max(1, raw*(1-combat.mitigation(eff_armor)))
+    local dot = opts.dot
+    if (not dot) and wsig and wsig.bleed_on_hit then
+        -- 流血：每秒该比例的本发伤害，持续 4s，1s tick，无视护甲(基于 raw)
+        dot = { mult=wsig.bleed_on_hit*(raw/dmg), dur=4, tick=1, color={0.85,0.2,0.2} }
+    end
     local tx, ty = (state.enemy and state.enemy.x or ENEMY_HOME_X), CB_ENEMY_Y
     local ang = atan2(ty-CB_BOW_Y, tx-CB_BOW_X) + (opts.spread or 0)
-    state.projectiles[#state.projectiles+1] = { x=CB_BOW_X, y=CB_BOW_Y, tx=tx, ty=ty, ang=ang, dmg=dmg, crit=crit, color=opts.color or col, t=0, dot=opts.dot }
+    state.projectiles[#state.projectiles+1] = { x=CB_BOW_X, y=CB_BOW_Y, tx=tx, ty=ty, ang=ang, dmg=dmg, crit=crit, color=opts.color or col, t=0, dot=dot }
 end
 function combat.archer_fire() combat.do_shot(1.0, {}) end
 

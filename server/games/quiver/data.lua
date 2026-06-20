@@ -62,6 +62,63 @@ for i,s in ipairs(D.SLOTS_L) do D.EQUIP_POS[s]={col="L",idx=i} end
 for i,s in ipairs(D.SLOTS_R) do D.EQUIP_POS[s]={col="R",idx=i} end
 D.TIER_PREFIX = { "破旧", "精铁", "精钢", "符文", "巨龙" }
 
+-- ============================================================================
+-- 武器三类型（§2.1）：差异轴 = 攻速带 + 内置暴击，三类型裸 DPS 守恒。
+--   spd = 攻速带(次/秒)，roll 时在带内随机；wmid*wspeed=budget*WEAPON_DPS_K 保持守恒。
+--   crit = 内置暴击修正(写进 gear.stats.crit_innate，recalc 计入)。
+--   程序名材料前缀用此处 prefix(无武器材料系统时的兜底类型名)。
+-- ============================================================================
+D.WEAPON_TYPES = {
+    shortbow = { id="shortbow", name="短弓", spd={0.72,0.92}, crit=-0.02, tag="快攻：每击触发多，利流血/毒/冰减速叠加" },
+    longbow  = { id="longbow",  name="长弓", spd={0.50,0.64}, crit= 0.00, tag="均衡通用：元素 DOT 覆盖稳" },
+    crossbow = { id="crossbow", name="弩",   spd={0.34,0.46}, crit= 0.06, tag="重击高暴：利大伤技能/穿甲重箭" },
+}
+D.WEAPON_TYPE_ORDER = { "shortbow", "longbow", "crossbow" }
+
+-- 签名特效字段说明（NAMED_WEAPONS.sig 里的键；战斗接最小可用子集，未接的留登记不报错）：
+--   haste=bool/num     攻速提升(true=默认 8%，数值=该比例)        —— recalc 接(乘攻速)
+--   crit=num           额外暴击率(0.08=+8%)                       —— recalc 接(加暴击)
+--   armor_pierce=num   命中无视该比例护甲(0.25=穿 25%)            —— do_shot 接(减敌减伤)
+--   bleed_on_hit=num   命中挂物理流血 DOT(每秒该比例单发伤害)     —— do_shot 接(挂 dot，无视护甲)
+--   ele_amp_fire/chill_amp/big_hit/...  其余喂 build 的字段先登记，后续期接(TODO)
+D.WEAPON_SIG_DESC = {
+    haste        = "出手如风：攻速提升",
+    crit         = "致命：暴击率提升",
+    armor_pierce = "破甲：命中无视部分护甲",
+    bleed_on_hit = "见血：命中叠加物理流血(无视护甲)",
+    ele_amp_fire = "焰盛：火属性伤害增幅",
+    chill_amp    = "霜噬：冰冻效果增强",
+    big_hit      = "重击：偶发额外重伤",
+}
+
+-- 命名武器（§2.2）：蓝(精良)+武器从这里抽，唯一名 + 签名特效。
+--   每条 = {name, wtype, min_ilvl, sig=固定签名特效, flavor}。
+--   roll 蓝+武器时在「类型匹配 且 ilvl 够 且 未拥有」池里抽一个，叠加随机词缀。
+--   覆盖低/中/高三段每类型若干（low ~10-18 / mid ~26-40 / high ~46-58）。
+D.NAMED_WEAPONS = {
+    -- ---- 低段(low, min_ilvl ~10-18) ----
+    { name="裂风",     wtype="shortbow", min_ilvl=10, sig={haste=0.08, bleed_on_hit=0.08}, flavor="出手如风，箭箭见血" },
+    { name="林语长弓", wtype="longbow",  min_ilvl=12, sig={ele_amp_fire=0.2},               flavor="附火之箭灼焰更盛" },
+    { name="贯石弩",   wtype="crossbow", min_ilvl=14, sig={armor_pierce=0.25, crit=0.08},   flavor="一矢洞穿顽石" },
+    { name="疾隼",     wtype="shortbow", min_ilvl=16, sig={haste=0.10, crit=0.04},          flavor="如隼扑食，迅疾连珠" },
+    { name="苍翠",     wtype="longbow",  min_ilvl=15, sig={crit=0.06, bleed_on_hit=0.06},   flavor="林间猎手的信物" },
+    { name="碎甲钉",   wtype="crossbow", min_ilvl=18, sig={armor_pierce=0.3, big_hit=0.15}, flavor="专破重甲" },
+    -- ---- 中段(mid, min_ilvl ~26-40) ----
+    { name="霜噬",     wtype="shortbow", min_ilvl=30, sig={chill_amp=0.3, haste=0.1},       flavor="箭锋裹霜，所触皆寒" },
+    { name="风暴之眼", wtype="shortbow", min_ilvl=34, sig={haste=0.14, bleed_on_hit=0.12},  flavor="叠流血的风暴核心" },
+    { name="赤焰长弓", wtype="longbow",  min_ilvl=28, sig={ele_amp_fire=0.3, crit=0.06},     flavor="燃尽不死的烈焰" },
+    { name="月辉",     wtype="longbow",  min_ilvl=36, sig={crit=0.1, armor_pierce=0.15},     flavor="清辉所照，无可遁形" },
+    { name="碎山弩",   wtype="crossbow", min_ilvl=32, sig={armor_pierce=0.35, crit=0.12},    flavor="一击碎山的重弩" },
+    { name="雷霆裁断", wtype="crossbow", min_ilvl=38, sig={crit=0.15, big_hit=0.2},          flavor="雷霆之下无活口" },
+    -- ---- 高段(high, min_ilvl ~46-58) ----
+    { name="嗜血风刃", wtype="shortbow", min_ilvl=46, sig={haste=0.16, bleed_on_hit=0.16},   flavor="越战越快，血流不止" },
+    { name="永霜",     wtype="shortbow", min_ilvl=52, sig={chill_amp=0.4, haste=0.14, crit=0.06}, flavor="万物归于永冻" },
+    { name="天罚长弓", wtype="longbow",  min_ilvl=48, sig={ele_amp_fire=0.4, crit=0.1},       flavor="天罚之焰，灼尽群敌" },
+    { name="星陨",     wtype="longbow",  min_ilvl=55, sig={crit=0.14, armor_pierce=0.25, big_hit=0.2}, flavor="坠星之力凝于一箭" },
+    { name="噬星弩",   wtype="crossbow", min_ilvl=50, sig={armor_pierce=0.4, crit=0.15},      flavor="连星辰也能贯穿" },
+    { name="王座裁决", wtype="crossbow", min_ilvl=57, sig={armor_pierce=0.4, crit=0.18, big_hit=0.25}, flavor="毕业级·陨灭王座的判决" },
+}
+
 D.ATTRS = { "str","agi","sta" }
 D.ATTR_NAME = { str="力量", agi="敏捷", sta="耐力" }
 D.ATTR_COLOR = { str={0.9,0.4,0.35}, agi={0.5,0.85,0.55}, sta={0.6,0.7,0.95} }

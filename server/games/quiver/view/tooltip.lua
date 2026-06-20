@@ -35,13 +35,25 @@ local function gear_detail_lines(g)
     local s = g.stats
     if s.wmin then lines[#lines+1] = { "攻击力  "..s.wmin.."~"..s.wmax, UI.text } end
     if s.wspeed then lines[#lines+1] = { string.format("攻速  %.2f 秒/次", 1/s.wspeed), UI.text } end
+    if g.wtype and D.WEAPON_TYPES[g.wtype] then
+        local def = D.WEAPON_TYPES[g.wtype]
+        lines[#lines+1] = { "类型  "..def.name, {0.7,0.8,1.0} }
+        if (s.crit_innate or 0) ~= 0 then
+            local sign = s.crit_innate>0 and "+" or ""
+            lines[#lines+1] = { "内置暴击  "..sign..math.floor(s.crit_innate*100+0.5).."%", {0.9,0.75,0.4} }
+        end
+    end
     for _,k in ipairs(ATTRS) do if s[k] then lines[#lines+1] = { "+"..s[k].."  "..ATTR_NAME[k], ATTR_COLOR[k] } end end
     if s.armor then lines[#lines+1] = { "护甲  +"..s.armor, UI.text } end
+    -- 签名特效（蓝+命名武器）
+    local sig = inv.gear_sig_lines(g)
+    if sig then for _,t in ipairs(sig) do lines[#lines+1] = { t, {1.0,0.62,0.2} } end end
     for _,af in ipairs(g.affixes) do
         local txt = af.pct and ((af.key=="crit" and "暴击" or ATTR_NAME[af.key] or af.key).."  +"..af.val.."%")
                             or ("+"..af.val.."  "..(ATTR_NAME[af.key] or af.key))
         lines[#lines+1] = { txt, {0.45,0.85,0.55} }
     end
+    if g.flavor and g.flavor~="" then lines[#lines+1] = { "“"..g.flavor.."”", UI.dim } end
     -- 武器：攻速基础来自武器，敏捷再按 % 加成
     if SLOT_INFO[g.slot].kind=="weapon" then lines[#lines+1] = { "敏捷再提升攻速、力量提升攻击", UI.dim } end
     return lines
