@@ -38,35 +38,11 @@ local function enemy_sprite(e)
         or "slime"
 end
 
--- ── 暮色像素背景（画在场景画布像素坐标）：3 段天空 + 暖地平线 + 月 + 远山 + 地面 + 小径 ──
+-- ── 暮色像素背景：共用 sprites.draw_backdrop（战斗场景走"出门小径"版）。──
 local SW, SH = screen.SCENE_W, screen.SCENE_H
-local HOR = math.floor(SH*0.56)   -- 地平线
+local HOR = sprites.HOR
 local function draw_backdrop()
-    for yy=0,HOR-1 do local t=yy/HOR; local col
-        if t<0.6 then col=lerp(P.sky_top,P.sky_mid,t/0.6) else col=lerp(P.sky_mid,P.sky_hor,(t-0.6)/0.4) end
-        C(col); love.graphics.rectangle("fill",0,yy,SW,1) end
-    C(P.warm,0.5); love.graphics.rectangle("fill",0,HOR-10,SW,10)
-    -- 月 + 辉 + 弯月 + 星
-    C(P.moon,0.10); love.graphics.circle("fill",SW-40,46,22)
-    C(P.moon); love.graphics.circle("fill",SW-40,46,13); C(P.sky_mid); love.graphics.circle("fill",SW-46,42,12)
-    C({1,1,1},0.8); for _,s in ipairs({{30,42},{63,27},{105,60},{SW-15,82},{45,105},{144,33},{90,132}}) do love.graphics.rectangle("fill",s[1],s[2],1,1) end
-    -- 远山
-    C(P.hill_far); love.graphics.ellipse("fill",54,HOR+24,108,46); love.graphics.ellipse("fill",SW-30,HOR+27,96,40)
-    C(P.hill_mid); love.graphics.ellipse("fill",SW/2,HOR+36,144,36)
-    -- 地面
-    C(P.grass); love.graphics.rectangle("fill",0,HOR,SW,SH-HOR)
-    C(P.grass_hi); love.graphics.rectangle("fill",0,HOR,SW,3)
-    -- 小径（向地平线收窄）
-    C(P.dirt); love.graphics.polygon("fill", 90,HOR, 114,HOR, 144,SH, 60,SH)
-    C(P.dirt_hi); love.graphics.polygon("fill", 96,HOR, 105,HOR, 111,SH, 87,SH)
-    -- 草丛 + 树（深度分层：远小冷 → 近大）
-    for _,g in ipairs({{18,HOR+16},{45,HOR+46},{180,HOR+22},{SW-12,HOR+60},{150,HOR+76}}) do
-        C(P.grass_dk); love.graphics.rectangle("fill",g[1],g[2],2,1); C(P.grass_hi); love.graphics.rectangle("fill",g[1],g[2]-1,1,1) end
-    sprites.draw_tree(30,HOR+20,18); sprites.draw_tree(SW-22,HOR+28,22)
-    sprites.draw_tree(18,HOR+110,38)
-    sprites.draw_bush(78,HOR+86,6); sprites.draw_rock(150,HOR+150,7)
-    -- 萤火
-    C(P.fly,0.9); for _,p in ipairs({{108,HOR+60},{150,HOR+45},{78,HOR+92},{192,HOR+66}}) do love.graphics.rectangle("fill",p[1],p[2],1,1) end
+    sprites.draw_backdrop({ path=true })
 end
 
 function combat_view.draw()

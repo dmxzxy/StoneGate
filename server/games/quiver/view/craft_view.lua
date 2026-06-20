@@ -1,11 +1,12 @@
 -- ============================================================================
--- view/craft_view —— 制造场景(draw_fletch)：弓手做工 + 当前图谱产出/缺料 + 下半屏已知图谱列表。
--- 提供 draw()、hit(x,y)->handled（点选下半屏图谱卡=切换并持续制造，属无面板场景内交互）、
--- craft_known_list/craft_card_rect（几何，draw 与 hit 共用）。
--- 依赖：base/screen + base/draw + core/state + fx + sys/inventory + sys/craft + view/items + data。
+-- view/craft_view —— 制造/锻造场景(像素世界)：暮色林地 + 主角 chop 做工 + 工作台(制造)/铁砧(锻造) +
+--   进度；下半屏维持设计空间(480x800)像素扁平皮：当前图谱产出/缺料 + tab + 已知图谱卡列表。
+-- 提供 draw()、hit(x,y)->handled（点选下半屏图谱卡=切换并持续制造）、craft_known_list/craft_card_rect。
+-- 依赖：base/screen + base/draw + view/sprites + core/state + fx + sys/inventory + sys/craft + view/items + data。
 -- ============================================================================
 local screen = require("base.screen")
 local draw = require("base.draw")
+local sprites = require("view.sprites")
 local state = require("core.state")
 local fx = require("fx")
 local inv = require("sys.inventory")
@@ -24,7 +25,6 @@ local function sy(v) return v*screen.sh end
 local setc = draw.setc
 local panel, bar, mat_chip = draw.panel, draw.bar, draw.mat_chip
 local rrect = draw.rrect
-local draw_archer = draw.draw_archer
 local inv_count, ammo_count = inv.inv_count, inv.ammo_count
 local can_craft = craft.can_craft
 local draw_item_icon = items.draw_item_icon
@@ -104,11 +104,29 @@ end
 
 function craft_view.draw()
     local sw, sh = screen.sw, screen.sh
-    local px,py = sx(80), DESIGN_H*0.40*sh
-    draw_archer(px,py,"chop",fx.swing*6)
-    setc({0.4,0.3,0.2}); love.graphics.rectangle("fill",px+sx(22),py-sy(2),sx(70),sy(10),3*sw)
-    local bp = state.player.craft_target
     local cx = love.graphics.getWidth()/2
+    local is_forge = (state.activity=="forge") or (craft_view.cur_tab()=="ingot" or craft_view.cur_tab()=="armor" or craft_view.cur_tab()=="bow")
+
+    -- ── 像素世界：场景画布（上半屏暮色工坊）──
+    screen.begin_scene()
+    sprites.draw_backdrop({ path=false })
+    local SW, SH, HOR = sprites.SCENE_W, sprites.SCENE_H, sprites.HOR
+    local gy = HOR + math.floor((SH-HOR)*0.40)
+    local hx = math.floor(SW*0.30)
+    local sx0 = hx + 22                       -- 工作台/铁砧紧贴主角右侧
+    if is_forge then sprites.draw_anvil(sx0, gy, fx.t_accum) else sprites.draw_bench(sx0, gy) end
+    -- 主角挥锤/做工：锻造工具头偏红铁、制造偏木
+    sprites.draw_hero(hx, gy, fx.swing*6, "chop", is_forge and {0.6,0.62,0.68} or {0.7,0.55,0.35})
+    -- 做工火花（锻造时坯料处冒火星）
+    if is_forge then
+        love.graphics.setColor(1,0.7,0.3, 0.5+0.3*math.sin(fx.t_accum*9))
+        for _,p in ipairs({{sx0-2,gy-16},{sx0+1,gy-18},{sx0-4,gy-15}}) do love.graphics.rectangle("fill",p[1],p[2],1,1) end
+    end
+    screen.end_scene()
+
+    -- ── HUD（设计空间 480x800，像素扁平皮）：产物信息锚在上半屏(设计 y≈320)，避开下半屏 tab/卡片 ──
+    local py = DESIGN_H*0.40*sh               -- 产物信息基准 y（与旧布局一致，清晰在 tab 之上）
+    local bp = state.player.craft_target
     if bp and state.player.bp_known[bp.id] and can_craft(bp) then
         -- 正在制造：产出图标(产物色) + 库存 + 进度（gear 不显数量，显槽名）
         local o=bp.out
