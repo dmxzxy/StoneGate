@@ -379,6 +379,7 @@ local PIX_ICON = {
     rest     = {".....","#####",".....","#####","....."},          -- 休息/床
     key      = {".##..","#..#.",".##..","..#..","..##."},          -- 钥匙
     license  = {"#####","#...#","#.#.#","#...#","#####"},          -- 许可文牒
+    gear     = {".#.#.","#####",".#.#.","#####",".#.#."},          -- 齿轮
 }
 function draw.pixel_icon(name, cx, cy, s, col)
     local g = PIX_ICON[name]; if not g then return end

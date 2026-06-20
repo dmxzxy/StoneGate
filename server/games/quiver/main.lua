@@ -48,6 +48,7 @@ local rest_view = require("view.rest_view")
 local bag_view = require("view.bag_view")
 local equip_view = require("view.equip_view")
 local mastery_view = require("view.mastery_view")
+local system_view = require("view.system_view")
 local region_view = require("view.region_view")
 local dungeon_view = require("view.dungeon_view")
 local activity_view = require("view.activity_view")
@@ -77,6 +78,16 @@ local function activity_tick(dt)
 end
 
 local function update(dt)
+    -- 系统菜单请求(由 view/system 设标志，在此主文件执行，避免循环 require)
+    if state.req_reset then
+        state.req_reset=nil; pcall(love.filesystem.remove, save.FILE); init(); fx.set_toast("存档已重置", D.UI.good)
+    end
+    if state.req_exit then
+        state.req_exit=nil; pcall(save.write)
+        if type(_G.stonegate_exit)=="function" then _G.stonegate_exit()    -- StoneGate 大厅
+        elseif love.event then love.event.quit() end                       -- standalone 退出
+        return
+    end
     fx.update_fx(dt)   -- 特效推进：粒子物理 / 跳字漂移 / toast 计时 / 震屏衰减 / 动画时钟（喂回 draw.t）
     -- 活动抽屉滑入/滑出动画（左侧 drawer）：开则 t→1，关则 t→0
     do
@@ -126,6 +137,8 @@ local function init()
         gather_node=nil,             -- 遭遇式采集当前节点（含 phase）
         -- 战斗精通(满级软成长)：points=可分配点，<id>=各精通已投级数
         mastery={ points=0 },
+        -- 系统设置（音量等；音频以后接上，先存好）
+        settings={ music=0.7, sfx=0.8 },
         -- 角色技能态：已学技能 / 冷却 / 限时增益 / 释放闪光
         skills={ "shoot" }, cd={}, buffs={}, cast_flash={} }
     for _,b in ipairs(BLUEPRINTS) do if b.learn=="start" then state.player.bp_known[b.id]=true end end
@@ -150,7 +163,7 @@ end
 -- 收进单个 save 表（避免主 chunk 触及 Lua 200 局部变量上限；文件拆分后会移到 base/save.lua）
 local save = {}
 save.FILE = "quiver/save.lua"
-save.VERSION = 8
+save.VERSION = 9
 local save_timer = 0
 
 -- 序列化一个纯数据值（数字/字符串/布尔/表）到 out 数组
@@ -193,6 +206,7 @@ function save.snapshot()
         forge=state.player.forge, forge_bp=state.player.forge_bp,
         energy=state.player.energy, energy_max=state.player.energy_max, last_time=state.player.last_time,
         mastery=state.player.mastery,
+        settings=state.player.settings,
         bag_slots=state.player.bag_slots,
         bp_known=state.player.bp_known, skills=state.player.skills,
         activity=state.activity, region_id=state.region.id, stage=state.stage,
@@ -290,6 +304,10 @@ function save.load()
         state.player.base_sta = data.base_sta or state.player.base_sta
         state.player.gold = data.gold or 0
         state.player.bag_slots = (type(data.bag_slots)=="number" and data.bag_slots>=24) and math.floor(data.bag_slots) or nil  -- 旧档无→nil→默认24
+        if type(data.settings)=="table" then
+            state.player.settings.music = tonumber(data.settings.music) or state.player.settings.music
+            state.player.settings.sfx   = tonumber(data.settings.sfx)   or state.player.settings.sfx
+        end
         state.player.equip = data.equip or {}
         state.player.skill = data.skill or state.player.skill
         state.player.craft = data.craft or state.player.craft
@@ -405,6 +423,14 @@ function love.draw()
     elseif state.panel_open=="bag" then bag_view.draw(); tooltip.draw_tooltip()
     elseif state.panel_open=="equip" then equip_view.draw(); tooltip.draw_tooltip()
     elseif state.panel_open=="mastery" then mastery_view.draw() end
+    -- 齿轮按钮(顶栏右上角，常驻可点) + 系统菜单
+    do
+        local screen_ = require("base.screen"); local dr = require("base.draw"); local sw = screen_.sw
+        local gx = love.graphics.getWidth()-34*sw; local gy=8*sw
+        love.graphics.setColor(0.10,0.11,0.16,0.85); love.graphics.rectangle("fill",gx,gy,22*sw,22*sw)
+        dr.pixel_icon("gear", gx+11*sw, gy+11*sw, 9*sw, {0.8,0.82,0.88})
+    end
+    if state.panel_open=="system" then system_view.draw() end
     -- 拖拽中的物品跟随指针（超过阈值才显示）
     bag_view.draw_drag()
     if state.result_banner=="defeat" then

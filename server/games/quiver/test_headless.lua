@@ -54,6 +54,7 @@ love.filesystem = {
   append = function(path,data) FS[path]=(FS[path] or "")..data; return true end,
   createDirectory = function() return true end,
   getSaveDirectory = function() return "/mock/save" end,
+  remove = function(path) FS[path]=nil; return true end,
 }
 
 -- enable the guarded test hook in main.lua

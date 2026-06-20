@@ -14,6 +14,7 @@ local skills_view = require("view.skills_view")
 local bag_view = require("view.bag_view")
 local equip_view = require("view.equip_view")
 local mastery_view = require("view.mastery_view")
+local system_view = require("view.system_view")
 local region_view = require("view.region_view")
 local craft_view = require("view.craft_view")
 local dungeon_view = require("view.dungeon_view")
@@ -32,6 +33,12 @@ function input.press(x,y)
     -- 副本流程(战斗中/结算)：无论是否开了面板，点击都先交给副本视图(放弃/确定/列表)
     if state.dungeon_run or state.dungeon_result then dungeon_view.press(x,y); return end
     local w,h=love.graphics.getWidth(),love.graphics.getHeight()
+    -- 齿轮按钮(右上角常驻)：开/关系统菜单。优先于其它(但副本流程已先拦)
+    do
+        local gw=22*screen.sw; local gx=w-34*screen.sw; local gy=8*screen.sw
+        if hit(x,y,gx,gy,gw,gw) then state.panel_open=(state.panel_open=="system") and nil or "system"; return end
+    end
+    if state.panel_open=="system" then system_view.hit(x,y); return end
     if not state.panel_open then
         -- 制造挂机中：点下半屏图谱卡 = 选图谱并持续制造
         if ACTIVITIES[state.activity].kind=="craft" then
