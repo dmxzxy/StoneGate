@@ -25,35 +25,39 @@ local NAMED_WEAPONS = D.NAMED_WEAPONS
 
 local inv = {}
 
+-- 背包格数：可花金币扩容(player.bag_slots)，旧档/缺省回 D.BAG_SLOTS。BAG() 用于所有遍历上界。
+function inv.bag_slots() return state.player.bag_slots or BAG_SLOTS end
+local function BAG() return state.player.bag_slots or BAG_SLOTS end
+
 -- ---- 堆叠 / 背包格 ----
 function inv.max_stack(kind) return (kind=="arrow") and 200 or 9999 end  -- 箭矢 200/堆
 function inv.inv_count(kind,id)
-    local n=0; for i=1,BAG_SLOTS do local it=state.player.inv[i]; if it and it.kind==kind and it.id==id then n=n+it.qty end end; return n
+    local n=0; for i=1,BAG() do local it=state.player.inv[i]; if it and it.kind==kind and it.id==id then n=n+it.qty end end; return n
 end
 -- 某采集大类(wood/ore/herb)在背包的材料总数(72 主材按 D.MAT[id].cat 归类，供采集页头部展示)
 function inv.cat_count(cat)
     local MAT=D.MAT; local n=0
-    for i=1,BAG_SLOTS do local it=state.player.inv[i]
+    for i=1,BAG() do local it=state.player.inv[i]
         if it and it.kind=="mat" and MAT[it.id] and MAT[it.id].cat==cat then n=n+it.qty end
     end
     return n
 end
 function inv.inv_add(kind,id,qty,gear)
     if kind=="gear" then
-        for i=1,BAG_SLOTS do if not state.player.inv[i] then state.player.inv[i]={kind="gear",gear=gear,qty=1}; return true end end
+        for i=1,BAG() do if not state.player.inv[i] then state.player.inv[i]={kind="gear",gear=gear,qty=1}; return true end end
         return false
     end
     local ms=inv.max_stack(kind)
     -- 先填已有未满的堆
-    for i=1,BAG_SLOTS do local it=state.player.inv[i]; if it and it.kind==kind and it.id==id and it.qty<ms then
+    for i=1,BAG() do local it=state.player.inv[i]; if it and it.kind==kind and it.id==id and it.qty<ms then
         local put=math.min(ms-it.qty,qty); it.qty=it.qty+put; qty=qty-put; if qty<=0 then return true end end end
     -- 再开新格（超过 200 自动分堆）
-    for i=1,BAG_SLOTS do if not state.player.inv[i] then
+    for i=1,BAG() do if not state.player.inv[i] then
         local put=math.min(ms,qty); state.player.inv[i]={kind=kind,id=id,qty=put}; qty=qty-put; if qty<=0 then return true end end end
     return qty<=0
 end
 function inv.inv_remove(kind,id,n)
-    for i=1,BAG_SLOTS do local it=state.player.inv[i]; if it and it.kind==kind and it.id==id then
+    for i=1,BAG() do local it=state.player.inv[i]; if it and it.kind==kind and it.id==id then
         local take=math.min(n,it.qty); it.qty=it.qty-take; n=n-take; if it.qty<=0 then state.player.inv[i]=nil end
         if n<=0 then break end end end
 end
@@ -66,6 +70,37 @@ function inv.inv_swap(a,b)
         if mv>0 then ib.qty=ib.qty+mv; ia.qty=ia.qty-mv; if ia.qty<=0 then state.player.inv[a]=nil end; return end
     end
     state.player.inv[a], state.player.inv[b] = ib, ia
+end
+
+-- 装备售价(铜钱)：稀有度倍率 × 装等，给个不太肥的回收价(引导卖垃圾换钱，不冲击金币经济)
+function inv.gear_value(g)
+    if not g then return 0 end
+    local r = RAR[g.rarity]
+    return math.max(1, math.floor((g.ilvl or 1) * (r and r.mult or 1) * 3))
+end
+-- 卖掉背包第 i 格的装备 → 加金币、清格。返回售价(0=非装备/空格)
+function inv.sell_slot(i)
+    local it = state.player.inv[i]
+    if not it or it.kind~="gear" then return 0 end
+    local v = inv.gear_value(it.gear)
+    state.player.gold = state.player.gold + v
+    state.player.inv[i] = nil
+    return v
+end
+-- 扩容下一格的价格(随已扩格数递增)；买一格 +1，封顶 60
+function inv.bag_expand_cost()
+    local cur = inv.bag_slots()
+    return math.floor(50 * (cur-23)^1.5 + 50)   -- 24格→100铜起，越扩越贵
+end
+function inv.bag_expand_max() return 60 end
+function inv.buy_bag_slot()
+    local cur = inv.bag_slots()
+    if cur >= inv.bag_expand_max() then return false end
+    local cost = inv.bag_expand_cost()
+    if state.player.gold < cost then return false end
+    state.player.gold = state.player.gold - cost
+    state.player.bag_slots = cur + 1
+    return true
 end
 
 -- ---- 箭袋弹药槽（成品箭三轴：{head,element,feather,qty}；只能放这里，不进主背包） ----

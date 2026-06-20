@@ -8,13 +8,14 @@
 local screen = require("base.screen")
 local draw = require("base.draw")
 local state = require("core.state")
+local fx = require("fx")
 local inv = require("sys.inventory")
 local items = require("view.items")
 local tooltip = require("view.tooltip")
 local D = require("data")
 local UI = D.UI
 local ARROW = D.ARROW
-local BAG_SLOTS = D.BAG_SLOTS
+local function BAG() return inv.bag_slots() end
 
 local function sx(v) return v*screen.sw end
 local function sy(v) return v*screen.sh end
@@ -69,7 +70,7 @@ function bag_view.bag_grid()
     local w,h=love.graphics.getWidth(),love.graphics.getHeight()
     local px,py,pw,ph=sx(16),sy(56),w-sx(32),h-sy(112)
     local gap=sx(6)
-    local rows=math.ceil(BAG_SLOTS/BAG_COLS)
+    local rows=math.ceil(BAG()/BAG_COLS)
     local gy0=py+sy(124)                      -- 标题 + 箭袋行 之下
     local bottom=py+ph-sy(48)                 -- 返回按钮上方留白
     local cw=(pw-sx(20)-gap*(BAG_COLS-1))/BAG_COLS
@@ -123,9 +124,9 @@ function bag_view.draw()
     end
 
     -- 主背包格（材料/装备）
-    local used=0; for i=1,BAG_SLOTS do if state.player.inv[i] then used=used+1 end end
-    setc(UI.dim); love.graphics.setFont(draw.font_sm); love.graphics.printf("背包  "..used.."/"..BAG_SLOTS, px, py+sy(102), pw-sx(14), "right")
-    for i=1,BAG_SLOTS do
+    local used=0; for i=1,BAG() do if state.player.inv[i] then used=used+1 end end
+    setc(UI.dim); love.graphics.setFont(draw.font_sm); love.graphics.printf("背包  "..used.."/"..BAG(), px, py+sy(102), pw-sx(14), "right")
+    for i=1,BAG() do
         local x,y=bag_cell_rect(i,gx,gy,cell,gap)
         local it=state.player.inv[i]
         local border = it and item_color(it) or {0.22,0.23,0.3}
@@ -138,7 +139,13 @@ function bag_view.draw()
             love.graphics.pop()
         end
     end
-    draw.button(px+pw/2-sx(60),py+ph-sy(34),sx(120),sy(28),"返回",{0.4,0.4,0.5},true)
+    -- 底部：返回 + 扩容(花金币买格子)
+    draw.button(px+sx(14),py+ph-sy(34),sx(96),sy(28),"返回",{0.4,0.4,0.5},true)
+    local full = inv.bag_slots() >= inv.bag_expand_max()
+    local cost = inv.bag_expand_cost()
+    local can = (not full) and state.player.gold >= cost
+    local label = full and "已满格" or ("扩容 "..draw.coin_str(cost))
+    draw.button(px+pw-sx(110),py+ph-sy(34),sx(96),sy(28),label, can and {0.35,0.55,0.35} or {0.3,0.3,0.34}, can, draw.font_sm)
 end
 
 -- 拖拽中的物品跟随指针（超过阈值才显示）
@@ -160,7 +167,11 @@ function bag_view.press(x,y)
     if state.tooltip then tooltip.tooltip_press(x,y); return true end
     local px,py,pw,ph,gx,gy,cell,gap = bag_grid()
     if draw.hit_close_x(x,y,px,py,pw) then state.panel_open=nil; return true end
-    if hit(x,y,px+pw/2-sx(60),py+ph-sy(34),sx(120),sy(28)) then state.panel_open=nil; return true end
+    if hit(x,y,px+sx(14),py+ph-sy(34),sx(96),sy(28)) then state.panel_open=nil; return true end
+    if hit(x,y,px+pw-sx(110),py+ph-sy(34),sx(96),sy(28)) then
+        if inv.buy_bag_slot() then fx.set_toast("背包已扩容", UI.good) else fx.set_toast("金币不足或已满格", UI.bad) end
+        return true
+    end
     -- 筛选 tab 点击（仅切视觉过滤，不动物品）
     for i,f in ipairs(BAG_FILTERS) do
         local tx,ty,tw,th = filter_tab_rect(i)
@@ -175,7 +186,7 @@ function bag_view.press(x,y)
         end
     end
     -- 主背包格 → 拾起
-    for i=1,BAG_SLOTS do
+    for i=1,BAG() do
         local cx,cyy=bag_cell_rect(i,gx,gy,cell,gap)
         if hit(x,y,cx,cyy,cell,cell) and state.player.inv[i] then
             state.drag={ from="bag", slot=i, item=state.player.inv[i], x=x, y=y, sx0=x, sy0=y, moved=false }; return true
@@ -193,7 +204,7 @@ function bag_view.drag_release(x,y)
     -- 找落点（先箭袋后主背包）
     local tgrid,tslot=nil,nil
     for i=1,(state.player.ammo_cap or 0) do local cx=ax+(i-1)*(acell+agap); if hit(x,y,cx,ay,acell,acell) then tgrid="ammo"; tslot=i; break end end
-    if not tgrid then for i=1,BAG_SLOTS do local cx,cyy=bag_cell_rect(i,gx,gy,cell,gap); if hit(x,y,cx,cyy,cell,cell) then tgrid="bag"; tslot=i; break end end end
+    if not tgrid then for i=1,BAG() do local cx,cyy=bag_cell_rect(i,gx,gy,cell,gap); if hit(x,y,cx,cyy,cell,cell) then tgrid="bag"; tslot=i; break end end end
     -- 未移动且落回原格 → 点击看详情
     if not d.moved and tgrid==d.from and tslot==d.slot then
         if d.from=="ammo" then local it=state.player.ammo[d.slot]; if it then state.tooltip={kind="arrow", head=it.head, element=it.element, feather=it.feather} end

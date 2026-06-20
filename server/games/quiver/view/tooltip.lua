@@ -7,6 +7,7 @@
 local screen = require("base.screen")
 local draw = require("base.draw")
 local state = require("core.state")
+local fx = require("fx")
 local inv = require("sys.inventory")
 local prog = require("sys.progression")
 local D = require("data")
@@ -127,7 +128,14 @@ function tooltip.draw_tooltip()
     local yy = ty+sy(64)
     for _,ln in ipairs(lines) do setc(ln[2]); love.graphics.print(ln[1], tx+sx(18), yy); yy = yy + sy(20) end
     local fy = ty+th-sy(40)
-    if equip then
+    -- 装备物品：背包里=[装备][出售][关闭]，已装备=[卸下][关闭]
+    if state.tooltip.kind=="gear" and state.tooltip.src=="bag" then
+        local bw=(tw-sx(52))/3
+        button(tx+sx(14), fy, bw, sy(30), "装备", {0.3,0.6,0.4}, true, draw.font_sm)
+        local val = require("sys.inventory").gear_value(state.tooltip.g)
+        button(tx+sx(20)+bw, fy, bw, sy(30), "出售 "..draw.coin_str(val), {0.6,0.5,0.25}, true, draw.font_sm)
+        button(tx+sx(26)+bw*2, fy, bw, sy(30), "关闭", {0.4,0.4,0.5}, true, draw.font_sm)
+    elseif equip then
         local bw=(tw-sx(40))/2
         button(tx+sx(14), fy, bw, sy(30), equip, {0.3,0.6,0.4}, true, draw.font_sm)
         button(tx+sx(26)+bw, fy, bw, sy(30), "关闭", {0.4,0.4,0.5}, true, draw.font_sm)
@@ -139,16 +147,24 @@ end
 function tooltip.tooltip_press(x,y)
     local tx,ty,tw,th = tooltip.tt_geom(state.tooltip)
     local fy = ty+th-sy(40)
-    if state.tooltip.kind=="gear" then
-        local bw=(tw-sx(40))/2
-        local on_action = x>=tx+sx(14) and x<=tx+sx(14)+bw and y>=fy and y<=fy+sy(30)
-        if on_action and state.tooltip.src=="bag" then
+    if state.tooltip.kind=="gear" and state.tooltip.src=="bag" then
+        local bw=(tw-sx(52))/3
+        local function inrow(bx) return x>=bx and x<=bx+bw and y>=fy and y<=fy+sy(30) end
+        if inrow(tx+sx(14)) then            -- 装备
             local i=state.tooltip.slot; local g=state.tooltip.g
             if i and state.player.inv[i] and state.player.inv[i].gear==g then state.player.inv[i]=nil end
             local old=state.player.equip[g.slot]; state.player.equip[g.slot]=g; if old then inv_add("gear",nil,1,old) end
             recalc(); state.tooltip=nil; return
-        elseif on_action and state.tooltip.src=="equip" then
-            -- 卸下：装备回背包
+        elseif inrow(tx+sx(20)+bw) then     -- 出售
+            local i=state.tooltip.slot
+            if i then local v=require("sys.inventory").sell_slot(i); fx.set_toast("出售获得 "..draw.coin_str(v), UI.gold) end
+            state.tooltip=nil; return
+        end
+        state.tooltip=nil; return
+    elseif state.tooltip.kind=="gear" then
+        local bw=(tw-sx(40))/2
+        local on_action = x>=tx+sx(14) and x<=tx+sx(14)+bw and y>=fy and y<=fy+sy(30)
+        if on_action and state.tooltip.src=="equip" then
             local g=state.tooltip.g
             if inv_add("gear",nil,1,g) then state.player.equip[g.slot]=nil; recalc() end
             state.tooltip=nil; return

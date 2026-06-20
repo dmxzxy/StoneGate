@@ -150,7 +150,7 @@ end
 -- 收进单个 save 表（避免主 chunk 触及 Lua 200 局部变量上限；文件拆分后会移到 base/save.lua）
 local save = {}
 save.FILE = "quiver/save.lua"
-save.VERSION = 7
+save.VERSION = 8
 local save_timer = 0
 
 -- 序列化一个纯数据值（数字/字符串/布尔/表）到 out 数组
@@ -193,6 +193,7 @@ function save.snapshot()
         forge=state.player.forge, forge_bp=state.player.forge_bp,
         energy=state.player.energy, energy_max=state.player.energy_max, last_time=state.player.last_time,
         mastery=state.player.mastery,
+        bag_slots=state.player.bag_slots,
         bp_known=state.player.bp_known, skills=state.player.skills,
         activity=state.activity, region_id=state.region.id, stage=state.stage,
     }
@@ -288,6 +289,7 @@ function save.load()
         state.player.base_agi = data.base_agi or state.player.base_agi
         state.player.base_sta = data.base_sta or state.player.base_sta
         state.player.gold = data.gold or 0
+        state.player.bag_slots = (type(data.bag_slots)=="number" and data.bag_slots>=24) and math.floor(data.bag_slots) or nil  -- 旧档无→nil→默认24
         state.player.equip = data.equip or {}
         state.player.skill = data.skill or state.player.skill
         state.player.craft = data.craft or state.player.craft

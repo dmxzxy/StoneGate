@@ -92,12 +92,21 @@ function combat.drop_loot()
     if arch and arch.drop_mat then droproll(arch.drop_mat, 0.35) end
     -- 通用兜底：羽毛(所有箭必需)总有点机会
     droproll("feather", 0.15)
-    local drop_p = (state.enemy.rank=="normal") and 0.3 or 1.0   -- 精英/稀有保底出装
+    -- 野外装备掉落：刻意极低，引导去副本刷装备。普通怪 1% 出装且强制压成白/绿(蓝+万分比)；
+    -- 精英 8% / 稀有 25% 出装(野外能出蓝紫但概率仍低)。副本掉落另在 sys/dungeon，保持肥包不受此影响。
+    local drop_p = (state.enemy.rank=="normal") and 0.01 or (state.enemy.rank=="elite") and 0.08 or 0.25
     if math.random() < drop_p then
         local ilvl = (state.enemy.rank=="normal") and math.random(state.region.ilo, state.region.ihi) or (state.region.ihi + rk.ilvl_bonus)
-        local pool = (state.enemy.rank=="normal") and state.region.rar or state.region.rar_elite
-        local rid  = pool[math.random(#pool)]
-        if rk.rar_up>0 and math.random()<rk.rar_up then rid = RARITIES[math.min(#RARITIES, RAR[rid].tier+1)].id end
+        local rid
+        if state.enemy.rank=="normal" then
+            -- 普通怪：基本白绿；万分比小概率冒蓝(rare)
+            local r=math.random()
+            rid = (r<0.0001 and "rare") or (r<0.02 and "uncommon") or (math.random()<0.5 and "common" or "poor")
+        else
+            local pool = state.region.rar_elite
+            rid = pool[math.random(#pool)]
+            if rk.rar_up>0 and math.random()<rk.rar_up then rid = RARITIES[math.min(#RARITIES, RAR[rid].tier+1)].id end
+        end
         local g = inv.roll_gear(SLOTS[math.random(#SLOTS)], ilvl, rid)
         local cur = state.player.equip[g.slot]
         if not cur or inv.gear_score(g) > inv.gear_score(cur) then
