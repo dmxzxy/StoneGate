@@ -27,9 +27,11 @@ local UI = D.UI
 
 -- atan2 兼容：LuaJIT(LÖVE) 有 math.atan2；标准 Lua 5.3+ 用双参 math.atan
 local atan2 = math.atan2 or math.atan
--- 战斗布景的设计坐标（与抛射物共用，保证箭从弓口射出；draw_combat 在 view 侧不依赖这些）
-local CB_BOW_X, CB_BOW_Y = 90, DESIGN_H*0.42-46       -- 弓口位置
-local CB_ENEMY_Y = DESIGN_H*0.42-12                   -- 敌人身体中心
+-- 战斗布景的设计坐标(480x800)，对齐 view/combat_view 的像素场景布局：
+--   主角弓手在场景(240x400) ~(67,281) → 设计(134,562)；敌人身体中心 ~设计 y=576。
+--   箭从弓口(134,562)射向敌人(enemy.x, 576)。改 view 布局时同步这里。
+local CB_BOW_X, CB_BOW_Y = 134, 562
+local CB_ENEMY_Y = 576
 
 local combat = {}
 

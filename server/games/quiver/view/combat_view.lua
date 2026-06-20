@@ -54,32 +54,34 @@ function combat_view.draw()
     local draw_amt = math.min(1, (state.player.atb or 0))
     if #state.projectiles > 0 then draw_amt = 0 end   -- 放箭瞬间松弦
     sprites.draw_hero(hx, gy, draw.t, "bow", nil, draw_amt)
-    -- 敌人像素精灵（design x → 场景 x；y 与主角同地面线）
+    -- 敌人像素精灵（design x → 场景 x；脚踩地面线 gy）
+    local enemy_screen   -- {cx,feet,topY} 屏幕坐标，供 HUD 血条/名字对齐
     if state.enemy then
         local hurt = state.enemy.hurt or 0
-        local ex = to_sx(state.enemy.x) + hurt*6   -- 受击向后(右)顿挫
-        local ey = gy
+        local ex = to_sx(state.enemy.x) + hurt*4   -- 受击向后(右)顿挫
         local alpha,scl = 1,1
         if state.enemy.phase=="dying" then local k=math.min(1,state.enemy.phase_t/DEATH_TIME); alpha=1-k; scl=1+k*0.4
         elseif state.enemy.phase=="enter" then alpha=math.min(1,state.enemy.phase_t/(ENTER_TIME*0.5)) end
-        local pscale = math.max(2, math.floor(5*scl + hurt*1.5))
-        love.graphics.setColor(1,1,1,alpha)
+        local nm = enemy_sprite(state.enemy); local m = sprites.M[nm] or sprites.M.slime
+        local pscale = math.max(2, math.floor(3*scl + hurt))   -- 缩小：base 3(原5太大)
+        local rows=#m.rows; local h=rows*pscale; local w=#m.rows[1]*pscale
+        local cy = gy - h/2                                    -- 精灵底边坐到地面线 gy
         if state.enemy.flash and state.enemy.flash>0 then
-            -- 受击白闪：用白色覆盖整精灵（画一遍纯白方块近似）
-            local nm = enemy_sprite(state.enemy); local m = sprites.M[nm] or sprites.M.slime
-            local w=#m.rows[1]*pscale; local h=#m.rows*pscale
             love.graphics.setColor(1,1,1,alpha)
-            love.graphics.rectangle("fill", math.floor(ex-w/2), math.floor(ey-h*0.85), w, h)
+            love.graphics.rectangle("fill", math.floor(ex-w/2), math.floor(gy-h), w, h)
         else
             love.graphics.setColor(1,1,1,alpha)
-            sprites.draw_monster(enemy_sprite(state.enemy), ex, ey-pscale*5, pscale, true)
+            sprites.draw_monster(nm, ex, cy, pscale, true)
         end
-        -- 精英/稀有光环
+        -- 精英/稀有光环（绕精灵中心）
         if state.enemy.rank=="elite" or state.enemy.rank=="rare" then
             local hc = (state.enemy.rank=="rare") and {0.78,0.5,1.0} or P.acc
             love.graphics.setColor(hc[1],hc[2],hc[3], alpha*(0.55+0.25*math.sin(fx.t_accum*5)))
-            love.graphics.setLineWidth(1); love.graphics.circle("line",ex,ey-pscale*5,pscale*7)
+            love.graphics.setLineWidth(1); love.graphics.circle("line",ex,cy,w*0.7)
         end
+        -- 记下屏幕坐标(场景→屏幕，整数放大同 end_scene)
+        local fX = love.graphics.getWidth()/SW; local fY = love.graphics.getHeight()/SH
+        enemy_screen = { cx=ex*fX, feet=gy*fY, topY=(gy-h)*fY }
     end
     -- 抛射物（p.x/p.y 是设计坐标 480x800 → 场景坐标 240x400）
     for _,p in ipairs(state.projectiles) do
@@ -93,21 +95,26 @@ function combat_view.draw()
     screen.end_scene()
 
     -- ── HUD（设计空间 480x800，像素扁平皮）──
-    -- 敌人血条/名字浮在敌人头顶（用屏幕坐标，对齐场景里的敌人）
-    local px,py = sx(70), DESIGN_H*0.42*screen.sh
-    if state.enemy and state.enemy.phase=="fight" then
-        local ex = state.enemy.x*screen.sw; local ey = py
-        bar(ex-sx(60),ey-sy(60),sx(120),sy(11),state.enemy.hp/state.enemy.max_hp,UI.bad,math.floor(state.enemy.hp))
-        bar(ex-sx(60),ey-sy(47),sx(120),sy(5),state.enemy.atb,{0.9,0.7,0.3})
+    -- 敌人血条/名字：用记录的屏幕坐标对齐场景里的精灵——名字在头顶，血条在脚下。
+    if state.enemy and state.enemy.phase=="fight" and enemy_screen then
+        local cx = enemy_screen.cx
+        local bw = sx(96); local bx = cx - bw/2
+        -- 名字在精灵头顶
         setc(state.enemy.rank=="rare" and {0.78,0.5,1.0} or state.enemy.rank=="elite" and UI.gold or UI.text)
-        love.graphics.setFont(draw.font_sm); love.graphics.printf(state.enemy.name.." Lv"..state.enemy.level, ex-sx(70), ey-sy(76), sx(140), "center")
+        love.graphics.setFont(draw.font_sm)
+        love.graphics.printf(state.enemy.name.." Lv"..state.enemy.level, cx-sx(80), enemy_screen.topY-sy(16), sx(160), "center")
+        -- 血条 + atb 在脚下
+        local fy = enemy_screen.feet + sy(4)
+        bar(bx, fy, bw, sy(9), state.enemy.hp/state.enemy.max_hp, UI.bad, math.floor(state.enemy.hp))
+        bar(bx, fy+sy(11), bw, sy(4), state.enemy.atb, {0.9,0.7,0.3})
     end
-    -- 玩家三条（锚在主角脚下：场景里主角约 design x≈115 / y≈600）
+    -- 玩家三条：锚在主角脚下(场景脚底 gy → 屏幕)
     local atbcol = buff_active("haste") and {0.4,0.95,0.95} or {0.4,0.7,1.0}
-    local bx = sx(60); local by = sy(640)
-    bar(bx,by,sx(110),sy(12),state.player.hp/state.player.max_hp,UI.good,math.floor(state.player.hp).."/"..state.player.max_hp)
-    bar(bx,by+sy(14),sx(110),sy(9),(state.player.mp or 0)/(state.player.max_mp or 1),{0.35,0.55,0.95},"MP "..math.floor(state.player.mp or 0))
-    bar(bx,by+sy(25),sx(110),sy(5),state.player.atb,atbcol)
+    local fX = love.graphics.getWidth()/SW; local fY = love.graphics.getHeight()/SH
+    local pbw = sx(108); local bx = math.floor(hx*fX - pbw/2); local by = math.floor(gy*fY + sy(6))
+    bar(bx,by,pbw,sy(11),state.player.hp/state.player.max_hp,UI.good,math.floor(state.player.hp).."/"..state.player.max_hp)
+    bar(bx,by+sy(13),pbw,sy(8),(state.player.mp or 0)/(state.player.max_mp or 1),{0.35,0.55,0.95},"MP "..math.floor(state.player.mp or 0))
+    bar(bx,by+sy(23),pbw,sy(4),state.player.atb,atbcol)
     -- 技能栏：横排已学技能 + 冷却环 + 释放白闪
     local n=#state.player.skills; local sz=sx(16); local gap=sx(10); local total=n*(sz*2)+(n-1)*gap
     local sx0=(love.graphics.getWidth()-total)/2; local sy0=sy(700)
