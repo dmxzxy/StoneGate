@@ -56,11 +56,16 @@ function fx.update_fx(dt)
 end
 
 -- ---- 绘制（共享粒子 / 跳字；与旧 main 内联画法逐字等价） ----
+-- ---- 绘制（共享粒子 / 跳字；像素风：整数对齐方块，硬边不糊） ----
 function fx.draw_particles()
     for _,p in ipairs(fx.particles) do
         local al=math.max(0,p.life/p.max)
         love.graphics.setColor(p.color[1],p.color[2],p.color[3],al)
-        love.graphics.rectangle("fill", p.x*screen.sw-p.size*screen.sw/2, p.y*screen.sh-p.size*screen.sh/2, p.size*screen.sw, p.size*screen.sh)
+        -- 整数对齐：位置与尺寸都取整，碎屑成干净像素块（贴像素场景观感）
+        local sz=math.max(1, math.floor(p.size*screen.sw + 0.5))
+        local x=math.floor(p.x*screen.sw - sz/2 + 0.5)
+        local y=math.floor(p.y*screen.sh - sz/2 + 0.5)
+        love.graphics.rectangle("fill", x, y, sz, sz)
     end
 end
 function fx.draw_floats()

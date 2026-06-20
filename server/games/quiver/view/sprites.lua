@@ -8,6 +8,7 @@
 -- ============================================================================
 local D = require("data")
 local screen = require("base.screen")
+local draw = require("base.draw")   -- 只取动画时钟 draw.t（萤火漂移相位）；draw 不 require sprites，无环。
 local P = D.PIX
 
 local sprites = {}
@@ -47,8 +48,16 @@ function sprites.draw_backdrop(opt)
     sprites.draw_tree(30,HOR+20,18); sprites.draw_tree(SW-22,HOR+28,22)
     sprites.draw_tree(18,HOR+110,38)
     sprites.draw_bush(78,HOR+86,6); sprites.draw_rock(150,HOR+150,7)
-    -- 萤火
-    C(P.fly,0.9); for _,p in ipairs({{108,HOR+60},{150,HOR+45},{78,HOR+92},{192,HOR+66}}) do love.graphics.rectangle("fill",p[1],p[2],1,1) end
+    -- 萤火：随时钟轻飘(整数像素，亮度脉动)。各点相位错开，避免齐步走。
+    local tt = draw.t or 0
+    local flies = {{108,HOR+60},{150,HOR+45},{78,HOR+92},{192,HOR+66},{126,HOR+78}}
+    for i,p in ipairs(flies) do
+        local ph = tt*1.4 + i*1.7
+        local fxp = math.floor(p[1] + math.sin(ph)*3)
+        local fyp = math.floor(p[2] + math.cos(ph*0.8)*2)
+        C(P.fly, 0.55 + 0.4*math.abs(math.sin(ph*1.3)))
+        love.graphics.rectangle("fill", fxp, fyp, 1, 1)
+    end
 end
 
 -- ── 怪物精灵：字符行 → 1px 方块（每精灵自带调色）。从 monsters_ref 原样移植。──
@@ -163,6 +172,7 @@ end
 -- cx,gy 为场景像素坐标（gy=脚底地面线）。t=动画相位。
 -- pose: "bow"(拉弓·战斗) | "chop"(挥工具·采集/制造/锻造，挥动相位用 t) | "rest"(坐着·休息) | "idle"。
 -- chop 的工具头颜色可传 tool（不传=灰斧头），让砍柴/采矿/制造视觉略有别。
+-- draw_amt(0..1): bow 姿势的拉弦量——0=松弦, 1=满拉。战斗里喂 player.atb 让弓随 ATB 张满, 发射归零=放箭手感。
 local function bone(x1,y1,x2,y2,w,col)
     C(col); local d=math.sqrt((x2-x1)^2+(y2-y1)^2); local steps=math.max(2,math.ceil(d))
     for i=0,steps do local u=i/steps; love.graphics.circle("fill",x1+(x2-x1)*u,y1+(y2-y1)*u,w) end
@@ -176,7 +186,7 @@ local function draw_head(hx, hy)
     C(P.hood_hi); love.graphics.arc("fill","pie",hx,hy,hr-1,math.pi*1.15,math.pi*1.5)
     C(P.outl); love.graphics.rectangle("fill",hx+2,hy-1,1,1)
 end
-function sprites.draw_hero(cx, gy, t, pose, tool)
+function sprites.draw_hero(cx, gy, t, pose, tool, draw_amt)
     pose = pose or "bow"
     t = t or 0
     if pose=="rest" then
@@ -218,13 +228,14 @@ function sprites.draw_hero(cx, gy, t, pose, tool)
         love.graphics.setLineWidth(1)
         return
     end
-    -- 默认/idle/bow：拉弓持弓
+    -- 默认/idle/bow：拉弓持弓。draw_amt 控拉弦量：满拉时后手(扣弦手)往后拉、上半身微沉。
+    local da = math.max(0, math.min(1, draw_amt or (pose=="bow" and 0.5 or 0)))
     local fElb={cx+5,gy-19-br}; local fHand={cx+10,gy-22-br}
-    local bElb={cx-4,gy-18-br}; local bHand={cx-2,gy-20-br}
+    local bElb={cx-4-da*2,gy-18-br}; local bHand={cx-2-da*4,gy-20-br}   -- 后手随拉弦后移
     bone(sh[1],sh[2],fElb[1],fElb[2],1.3,P.outl); bone(fElb[1],fElb[2],fHand[1],fHand[2],1.3,P.skin)
     bone(sh[1],sh[2],bElb[1],bElb[2],1.3,P.outl); bone(bElb[1],bElb[2],bHand[1],bHand[2],1.3,P.skin)
     draw_head(head[1],head[2])
-    -- 弓 + 弦 + 搭箭
+    -- 弓 + 弦 + 搭箭（弦被后手拉成尖角，张力越大尖角越深）
     C({0.55,0.37,0.20}); love.graphics.setLineStyle("smooth"); love.graphics.setLineWidth(1.4)
     love.graphics.arc("line","open",fHand[1],fHand[2],6,-1.35,1.35)
     C({0.85,0.83,0.7}); love.graphics.setLineWidth(0.8)
@@ -232,6 +243,7 @@ function sprites.draw_hero(cx, gy, t, pose, tool)
     local t2x,t2y=fHand[1]+6*math.cos(1.35), fHand[2]+6*math.sin(1.35)
     love.graphics.line(t1x,t1y, bHand[1],bHand[2], t2x,t2y)
     if pose=="bow" then
+        -- 搭在弦上的箭：箭尾跟后手, 满拉时箭簇仍贴弓口(蓄势待发)
         C(P.acc); love.graphics.setLineWidth(1); love.graphics.line(bHand[1],bHand[2], fHand[1]+5,fHand[2])
         love.graphics.polygon("fill", fHand[1]+6,fHand[2], fHand[1]+3,fHand[2]-1.5, fHand[1]+3,fHand[2]+1.5)
     end

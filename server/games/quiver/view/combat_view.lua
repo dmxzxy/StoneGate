@@ -49,16 +49,19 @@ function combat_view.draw()
     -- ── 像素世界：场景画布 ──
     screen.begin_scene()
     draw_backdrop()
-    -- 主角站在小径左侧、地面线上
+    -- 主角站在小径左侧、地面线上。弓随 ATB 张满；刚发射(箭在飞)→松弦放箭手感。
     local hx = math.floor(SW*0.24); local gy = HOR + math.floor((SH-HOR)*0.45)
-    sprites.draw_hero(hx, gy, draw.t, "bow")
+    local draw_amt = math.min(1, (state.player.atb or 0))
+    if #state.projectiles > 0 then draw_amt = 0 end   -- 放箭瞬间松弦
+    sprites.draw_hero(hx, gy, draw.t, "bow", nil, draw_amt)
     -- 敌人像素精灵（design x → 场景 x；y 与主角同地面线）
     if state.enemy then
-        local ex = to_sx(state.enemy.x); local ey = gy
+        local hurt = state.enemy.hurt or 0
+        local ex = to_sx(state.enemy.x) + hurt*6   -- 受击向后(右)顿挫
+        local ey = gy
         local alpha,scl = 1,1
         if state.enemy.phase=="dying" then local k=math.min(1,state.enemy.phase_t/DEATH_TIME); alpha=1-k; scl=1+k*0.4
         elseif state.enemy.phase=="enter" then alpha=math.min(1,state.enemy.phase_t/(ENTER_TIME*0.5)) end
-        local hurt = state.enemy.hurt or 0
         local pscale = math.max(2, math.floor(5*scl + hurt*1.5))
         love.graphics.setColor(1,1,1,alpha)
         if state.enemy.flash and state.enemy.flash>0 then
