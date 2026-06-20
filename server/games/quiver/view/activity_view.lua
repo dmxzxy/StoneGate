@@ -69,12 +69,12 @@ function activity_view.draw()
             panel(px+sx(10),yy,pw-sx(20),e.h, cur and {0.15,0.2,0.3,0.97} or {0.11,0.12,0.17,0.95}, cur and UI.btn or UI.line, 8*sw)
             -- 选中态左侧彩色竖条（分类语言）
             if cur then setc(UI.good); rrect("fill", px+sx(10), yy+sy(4), sx(3), e.h-sy(8), 2*sw) end
-            -- 活动图标（按 kind 简笔，置于行左侧）
+            -- 活动图标（像素剪影，按 kind，置于行左侧）
             local icx,icy = px+sx(28), yy+e.h/2
-            if a.kind=="gather" then draw.icon_mat(a.mat, icx, icy, sy(9))
-            elseif a.kind=="craft" then draw.icon_arrow(icx, icy, sy(10), a.job=="forge" and {0.8,0.55,0.4} or {0.7,0.6,0.4})
-            elseif a.kind=="combat" then draw.icon_kind("weapon", icx, icy, sy(9), {0.9,0.55,0.5})
-            else setc(UI.dim); love.graphics.circle("line", icx, icy, sy(8)); setc(UI.dim); love.graphics.circle("fill", icx, icy, sy(2)) end
+            if a.kind=="gather" then draw.pixel_icon("gather", icx, icy, sy(11), MAT_COLOR[a.mat] or {0.6,0.8,0.5})
+            elseif a.kind=="craft" then draw.pixel_icon(a.job=="forge" and "forge" or "craft", icx, icy, sy(11), a.job=="forge" and {0.85,0.6,0.4} or {0.8,0.7,0.45})
+            elseif a.kind=="combat" then draw.pixel_icon("combat", icx, icy, sy(11), {0.92,0.55,0.5})
+            else draw.pixel_icon("rest", icx, icy, sy(11), UI.dim) end
             setc(UI.text); love.graphics.setFont(draw.font); love.graphics.print(a.name, px+sx(44), yy+sy(7))
             love.graphics.setFont(draw.font_sm); setc(UI.dim)
             if a.kind=="gather" then

@@ -45,23 +45,9 @@ local BTN_LABELS = {
     { "装备", UI.btn },          { "地区", {0.3,0.5,0.7} },
 }
 
--- 小入口图标（简笔，置于按钮上半部）
+-- 小入口图标（像素剪影，置于按钮上半部）
 local function btn_icon(id, cx, cy, s, col)
-    setc(col); love.graphics.setLineWidth(math.max(1,sx(1.6)))
-    if id=="activity" then       -- 上三角
-        love.graphics.polygon("line", cx,cy-s, cx+s*0.9,cy+s*0.7, cx-s*0.9,cy+s*0.7)
-    elseif id=="skills" then     -- 斜箭(技能)
-        icon_arrow(cx, cy, s*0.95, col)
-    elseif id=="bag" then        -- 背包袋
-        love.graphics.polygon("line", cx-s*0.8,cy+s*0.8, cx-s*0.6,cy-s*0.4, cx+s*0.6,cy-s*0.4, cx+s*0.8,cy+s*0.8)
-        love.graphics.arc("line","open", cx,cy-s*0.4, s*0.45, math.pi, math.pi*2)
-    elseif id=="equip" then      -- 盾
-        love.graphics.polygon("line", cx,cy-s, cx+s*0.85,cy-s*0.4, cx+s*0.55,cy+s, cx,cy+s*1.05, cx-s*0.55,cy+s, cx-s*0.85,cy-s*0.4)
-    else                          -- region：旗
-        love.graphics.line(cx-s*0.6,cy-s, cx-s*0.6,cy+s)
-        love.graphics.polygon("line", cx-s*0.6,cy-s, cx+s*0.7,cy-s*0.55, cx-s*0.6,cy-s*0.1)
-    end
-    love.graphics.setLineWidth(1)
+    draw.pixel_icon(id, cx, cy, s, col)
 end
 
 -- ----------------------------------------------------------------------------
@@ -74,13 +60,16 @@ local function draw_topcard()
     love.graphics.setColor(0.05,0.06,0.1,0.95); love.graphics.rectangle("fill",0,0,w,sy(64))
     love.graphics.setColor(UI.btn[1],UI.btn[2],UI.btn[3],0.5); love.graphics.rectangle("fill",0,sy(64)-2*screen.sh,w,2*screen.sh)
 
-    -- 头像卡(8,6,62,54)：scissor 内露头+弓臂，脚落框外
+    -- 头像卡(8,6,62,54)：scissor 内露 chibi 弓手半身+弓臂，脚落框外
     local cx,cy,cw,ch = sx(8),sy(6),sx(56),sy(54)
     draw.panel(cx,cy,cw,ch, {0.1,0.11,0.16,0.95}, UI.line, sx(6))
+    -- 卡内暮色底（与场景同调），衬出像素剪影
+    setc({0.14,0.13,0.22,0.95}); love.graphics.rectangle("fill",cx+sx(2),cy+sy(2),cw-sx(4),ch-sy(4))
     love.graphics.push("all")
     love.graphics.setScissor(cx,cy,cw,ch)
-    -- 把火柴弓手放到框内，脚在框下沿外，只露上半身+弓臂
-    draw.draw_archer(cx+cw*0.42, cy+ch+sy(18), "bow", draw.t)
+    -- chibi 像素弓手：脚在框下沿外 → 只露上半身+大头+弓臂；像素格随缩放取整
+    local ps = math.max(2, sx(1.7))
+    draw.draw_hero_chibi(cx+cw*0.5, cy+ch+sy(20), ps, draw.t)
     love.graphics.pop()
     -- 等级徽章（左下角圆）
     setc(UI.gold); love.graphics.circle("fill", cx+sx(11), cy+ch-sy(11), sx(10))
@@ -93,12 +82,17 @@ local function draw_topcard()
     bar(bx, sy(22), bw, sy(7),  (p.mp or 0)/(p.max_mp or 1), UI.btn, "MP "..math.floor(p.mp or 0))
     bar(bx, sy(33), bw, sy(5),  p.xp/p.xp_next,       UI.xp)
 
-    -- 右上资源：金币 + 当前箭档数
-    icon_coin(w-sx(86), sy(13), sx(8)); setc(UI.gold); love.graphics.setFont(draw.font_sm)
-    love.graphics.print(p.gold, w-sx(74), sy(7))
-    local acol = p.arrow_tier and p.arrow_tier.color or {0.5,0.3,0.3}
-    local acnt = p.arrow_tier and ammo_count(p.arrow_tier.id) or 0
-    icon_arrow(w-sx(82), sy(34), sx(10), acol); setc(acol); love.graphics.print(acnt, w-sx(70), sy(28))
+    -- 右上资源列：金币 / 许可(energy) / 钥匙总数，像素图标 + zpix 数
+    local rx = w - sx(90)
+    icon_coin(rx, sy(11), sx(7)); setc(UI.gold); love.graphics.setFont(draw.font_sm)
+    love.graphics.print(p.gold, rx+sx(12), sy(7))
+    -- 探险许可：文牒图标 + 当前/上限
+    draw.pixel_icon("license", rx, sy(27), sx(8), {0.55,0.78,0.95})
+    setc({0.6,0.82,1}); love.graphics.print(math.floor(p.energy or 0).."/"..math.floor(p.energy_max or 0), rx+sx(12), sy(23))
+    -- 钥匙：三种 boss 钥匙总数
+    local keys = (inv.inv_count("mat","iron_key") or 0)+(inv.inv_count("mat","ember_key") or 0)+(inv.inv_count("mat","void_key") or 0)
+    draw.pixel_icon("key", rx, sy(43), sx(8), {0.9,0.78,0.4})
+    setc({0.95,0.85,0.5}); love.graphics.print(keys, rx+sx(12), sy(39))
 
     -- toast 在卡片之下淡出（不压资源区）
     if fx.toast then love.graphics.setFont(draw.font_sm); setc(fx.toast.color, math.min(1,fx.toast.timer))

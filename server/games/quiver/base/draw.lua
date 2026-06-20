@@ -262,6 +262,93 @@ function draw.draw_archer(px, py, pose, phase)
     love.graphics.pop()
 end
 
+-- ============================================================================
+-- 像素件：chibi 骨骼弓手头像 + 网格剪影图标（复用 _pixel_ref/scene_hero_ref 的画法）。
+-- 用于 HUD 头像卡与底部导航 / 活动抽屉的图标，保住硬边像素观感（整数像素、无抗锯齿弧）。
+-- ============================================================================
+-- chibi 骨骼弓手：代码关节(非PNG帧)、大头比例、拉弓姿势 + 呼吸。
+-- 在一块本地像素网格里画(px≈1 像素格)，落点 (ox,oy) 为脚底；ps=像素格边长(屏幕像素)。
+-- 调用方一般把它当头像半身：把脚放到框下沿外，scissor 只露上半身+弓臂。
+-- phase 不传则用 draw.t（纯展示相位）。
+function draw.draw_hero_chibi(ox, oy, ps, phase)
+    ps = ps or math.max(2, sx(3)); phase = phase or draw.t
+    local br = math.sin(phase*2)*ps*0.6          -- 呼吸：上半身轻微起伏
+    -- 关节（单位=像素格，相对脚底 oy 往上）。比例照 ref（chibi 大头）。
+    local function P(gx,gy) return ox+gx*ps, oy+gy*ps end
+    local pelvis={P(0,-12)}; local chest={P(0,-19)}; local head={P(0,-27)}
+    chest[2]=chest[2]-br; head[2]=head[2]-br
+    local hr = ps*6
+    local sh={chest[1],chest[2]}
+    local fElb={P(5,-19)}; fElb[2]=fElb[2]-br; local fHand={P(10,-22)}; fHand[2]=fHand[2]-br
+    local bElb={P(-4,-18)}; bElb[2]=bElb[2]-br; local bHand={P(-2,-20)}; bHand[2]=bHand[2]-br
+    local kL={P(-3,-6)}; local fL={P(-5,0)}; local kR={P(3,-6)}; local fR={P(4,0)}
+    -- 画一条"骨"：沿线撒像素圆点（粗细 w，像素格单位），保留 ref 的颗粒感
+    local OUTL={0.11,0.09,0.12}; local SKIN={0.93,0.74,0.52}
+    local HOOD={0.28,0.50,0.36}; local HOODHI={0.38,0.64,0.46}; local ACC={0.96,0.75,0.34}
+    local function bone(a,b,w,col)
+        setc(col); local dx,dy=b[1]-a[1],b[2]-a[2]; local d=math.sqrt(dx*dx+dy*dy)
+        local steps=math.max(2,math.ceil(d/ps)); for i=0,steps do local u=i/steps
+            love.graphics.circle("fill", a[1]+dx*u, a[2]+dy*u, w*ps) end
+    end
+    -- 腿
+    bone(pelvis,kL,1.4,OUTL); bone(kL,fL,1.4,OUTL)
+    bone(pelvis,kR,1.4,OUTL); bone(kR,fR,1.4,OUTL)
+    -- 躯干（带兜帽袍色一段，区别于细线版）
+    bone(pelvis,chest,1.9,HOOD); bone(pelvis,chest,1.2,HOODHI)
+    -- 手臂（肩→肘 兜帽色，肘→手 肤色）
+    bone(sh,fElb,1.3,HOOD); bone(fElb,fHand,1.3,SKIN)
+    bone(sh,bElb,1.3,HOOD); bone(bElb,bHand,1.3,SKIN)
+    -- 头（大头 chibi：描边 + 肤 + 兜帽弧 + 一个眼点）
+    setc(OUTL); love.graphics.circle("fill",head[1],head[2],hr+ps*0.6)
+    setc(SKIN); love.graphics.circle("fill",head[1],head[2],hr)
+    setc(HOOD);   love.graphics.arc("fill","pie",head[1],head[2],hr+ps*0.8,math.pi*1.05,math.pi*1.95)
+    setc(HOODHI); love.graphics.arc("fill","pie",head[1],head[2],hr-ps,  math.pi*1.15,math.pi*1.5)
+    setc(OUTL); love.graphics.rectangle("fill",head[1]+ps*2,head[2]-ps,ps,ps)   -- 眼
+    -- 弓（前手处的弧 + 弦 + 箭）
+    setc({0.55,0.37,0.20}); love.graphics.setLineWidth(math.max(1,ps*1.4))
+    love.graphics.arc("line","open",fHand[1],fHand[2],ps*6,-1.35,1.35)
+    setc({0.85,0.83,0.7}); love.graphics.setLineWidth(math.max(1,ps*0.8))
+    local t1x,t1y=fHand[1]+ps*6*math.cos(-1.35),fHand[2]+ps*6*math.sin(-1.35)
+    local t2x,t2y=fHand[1]+ps*6*math.cos(1.35), fHand[2]+ps*6*math.sin(1.35)
+    love.graphics.line(t1x,t1y, bHand[1],bHand[2], t2x,t2y)
+    setc(ACC); love.graphics.setLineWidth(math.max(1,ps)); love.graphics.line(bHand[1],bHand[2], fHand[1]+ps*5,fHand[2])
+    love.graphics.polygon("fill", fHand[1]+ps*6,fHand[2], fHand[1]+ps*3,fHand[2]-ps*1.5, fHand[1]+ps*3,fHand[2]+ps*1.5)
+    love.graphics.setLineWidth(1)
+end
+
+-- 网格剪影图标：在 5×5 像素网格里点亮格子画硬边剪影。(cx,cy)=图标中心，s=半径(图标≈2s)。
+-- name: activity/skills/bag/equip/region/coin/key/license/forge/gather/rest/combat。
+-- 用 1 像素格 = s/2.5，整数对齐，无抗锯齿 → 干净像素剪影。col 为主色。
+local PIX_ICON = {
+    activity = {"..#..","..#..",".###.","#####",".###."},          -- 上箭头/帐篷
+    skills   = {"....#","...#.","..#..",".#.#.","#...#"},          -- 飞箭
+    bag      = {".###.","#...#","#####","#####","#####"},          -- 背包袋
+    equip    = {"#####",".###.",".###.","..#..","..#.."},          -- 盾
+    region   = {"#....","####.","#..#.","####.","#...."},          -- 旗
+    combat   = {"#...#",".#.#.","..#..",".#.#.","#...#"},          -- 交叉(战斗)
+    gather   = {"..#..","..#..","#####","..#..","..#.."},          -- 镐/采集
+    craft    = {".###.","#...#","#.#.#","#...#",".###."},          -- 工件
+    forge    = {"#...#","#...#",".###.","..#..","..#.."},          -- 砧/漏斗
+    rest     = {".....","#####",".....","#####","....."},          -- 休息/床
+    key      = {".##..","#..#.",".##..","..#..","..##."},          -- 钥匙
+    license  = {"#####","#...#","#.#.#","#...#","#####"},          -- 许可文牒
+}
+function draw.pixel_icon(name, cx, cy, s, col)
+    local g = PIX_ICON[name]; if not g then return end
+    local cell = math.max(1, math.floor(s/2.5 + 0.5))    -- 像素格边长(整数)
+    local n = 5
+    local x0 = math.floor(cx - n*cell/2 + 0.5)
+    local y0 = math.floor(cy - n*cell/2 + 0.5)
+    setc(col or {0.96,0.96,1})
+    for row=1,n do local line=g[row]
+        for cidx=1,n do
+            if line:sub(cidx,cidx)=="#" then
+                love.graphics.rectangle("fill", x0+(cidx-1)*cell, y0+(row-1)*cell, cell, cell)
+            end
+        end
+    end
+end
+
 -- 技能图标（按 effect 画简单符号），用于战斗技能栏与技能大师。s 为技能数据(含 color/effect)。
 function draw.draw_skill_icon(s, cx, cy, sz)
     local c = s.color
