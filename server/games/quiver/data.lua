@@ -23,7 +23,7 @@ D.ENEMY_HOME_X = D.DESIGN_W * 0.72
 -- 遭遇式采集：寻找→遇到→判定→采集 的阶段时长 + 资源节点停靠位
 D.GATHER_SEARCH, D.GATHER_FOUND, D.GATHER_DONE = 0.7, 0.35, 0.3
 D.NODE_HOME_X = D.DESIGN_W * 0.66
-D.GEAR_BUDGET = 4
+D.GEAR_BUDGET = 2.6   -- 装备预算系数(4→2.6 压数值爆炸；稀有度倍率保留差距大，传说仍远强于精良)
 D.CRIT_MULT = 2.0
 D.ARMOR_K = 160
 D.WEAPON_DPS_K = 0.55          -- 武器 DPS 系数(= 旧基础攻速)；武器伤害区间由它与攻速反推，保证 DPS 守恒
