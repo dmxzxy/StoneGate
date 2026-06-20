@@ -190,10 +190,26 @@ function draw.icon_arrow(cx, cy, s, col)
 end
 local icon_arrow = draw.icon_arrow
 
-function draw.icon_coin(cx,cy,r)
-    setc({0.78,0.58,0.12}); love.graphics.circle("fill",cx,cy,r)
-    setc(UI.gold); love.graphics.circle("fill",cx,cy,r*0.7)
+function draw.icon_coin(cx,cy,r,tier)
+    -- tier: "gold"(默认)/"silver"/"copper"，决定币色；底层金钱仍是总铜数，只显示分级
+    local base,face = {0.78,0.58,0.12}, UI.gold
+    if tier=="silver" then base,face = {0.55,0.58,0.62},{0.82,0.85,0.9}
+    elseif tier=="copper" then base,face = {0.5,0.32,0.16},{0.82,0.52,0.30} end
+    setc(base); love.graphics.circle("fill",cx,cy,r)
+    setc(face); love.graphics.circle("fill",cx,cy,r*0.7)
     setc({1,1,1,0.5}); love.graphics.circle("fill",cx-r*0.25,cy-r*0.25,r*0.18)
+end
+-- 把总铜数拆成 金/银/铜（100 进位）。返回 {g=,s=,c=}
+function draw.coin_parts(total)
+    total = math.max(0, math.floor(total or 0))
+    return { g=math.floor(total/10000), s=math.floor(total/100)%100, c=total%100 }
+end
+-- 紧凑文字形式（只显示非零的高位两级，避免太长）。如 "1金23银"、"45银6铜"、"7铜"
+function draw.coin_str(total)
+    local p=draw.coin_parts(total)
+    if p.g>0 then return p.g.."金"..(p.s>0 and (p.s.."银") or "")
+    elseif p.s>0 then return p.s.."银"..(p.c>0 and (p.c.."铜") or "")
+    else return p.c.."铜" end
 end
 
 -- 药瓶图标（圆肚 + 细颈 + 瓶塞），col=药液色

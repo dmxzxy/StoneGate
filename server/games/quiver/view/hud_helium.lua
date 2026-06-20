@@ -82,10 +82,13 @@ local function draw_topcard()
     bar(bx, sy(22), bw, sy(7),  (p.mp or 0)/(p.max_mp or 1), UI.btn, "MP "..math.floor(p.mp or 0))
     bar(bx, sy(33), bw, sy(5),  p.xp/p.xp_next,       UI.xp)
 
-    -- 右上资源列：金币 / 许可(energy) / 钥匙总数，像素图标 + zpix 数
-    local rx = w - sx(90)
-    icon_coin(rx, sy(11), sx(7)); setc(UI.gold); love.graphics.setFont(draw.font_sm)
-    love.graphics.print(p.gold, rx+sx(12), sy(7))
+    -- 右上资源列：金钱(铜银金分级显示) / 许可(energy) / 钥匙总数
+    local rx = w - sx(96)
+    local cp = draw.coin_parts(p.gold)
+    local ctier = (cp.g>0 and "gold") or (cp.s>0 and "silver") or "copper"
+    icon_coin(rx, sy(11), sx(7), ctier)
+    setc(ctier=="gold" and UI.gold or ctier=="silver" and {0.82,0.85,0.9} or {0.82,0.52,0.30})
+    love.graphics.setFont(draw.font_sm); love.graphics.print(draw.coin_str(p.gold), rx+sx(12), sy(7))
     -- 探险许可：文牒图标 + 当前/上限
     draw.pixel_icon("license", rx, sy(27), sx(8), {0.55,0.78,0.95})
     setc({0.6,0.82,1}); love.graphics.print(math.floor(p.energy or 0).."/"..math.floor(p.energy_max or 0), rx+sx(12), sy(23))
