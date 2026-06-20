@@ -16,6 +16,7 @@ local RARITIES, RAR = D.RARITIES, D.RAR
 local SLOTS = D.SLOTS
 local ENEMY_ARCH, ENEMY_RANK = D.ENEMY_ARCH, D.ENEMY_RANK
 local ENEMY_FAMILY = D.ENEMY_FAMILY
+local BOSSES = D.BOSSES
 local CRIT_MULT = D.CRIT_MULT
 local ARMOR_K = D.ARMOR_K
 local ENEMY_HOME_X = D.ENEMY_HOME_X
@@ -34,12 +35,13 @@ local combat = {}
 
 function combat.mitigation(armor) return armor/(armor+ARMOR_K) end
 
-function combat.make_enemy(arch_id, rank)
+function combat.make_enemy(arch_id, rank, lvl_override)
     rank = rank or "normal"
     local arch=ENEMY_ARCH[arch_id]; local rk=ENEMY_RANK[rank]
     local fam = ENEMY_FAMILY[arch.family] or ENEMY_FAMILY.beast
     -- 等级在地区区间内随机；精英/稀有也用区间随机（仅靠系数变强，不另外拔高等级）
-    local lvl = math.random(state.region.lo, state.region.hi)
+    -- lvl_override：副本波次小怪用固定档(不依赖 state.region 区间)。
+    local lvl = lvl_override or math.random(state.region.lo, state.region.hi)
     local scale = 1 + (lvl-1)*0.22 + (state.stage%5)*0.04
     local hp = math.floor(60*arch.hp*scale*rk.hp)
     -- 护甲叠 family armor_mul(construct ×1.3 逼穿甲/弩)。base_armor 记原值供破甲减益按比例扣。
@@ -49,6 +51,18 @@ function combat.make_enemy(arch_id, rank)
     return { arch_id=arch_id, family=arch.family, name=(rk.tag~="" and rk.tag.." " or "")..arch.name, color=col, level=lvl, rank=rank,
         max_hp=hp, hp=hp, attack=math.floor(8*arch.dmg*scale*rk.atk), armor=armor, base_armor=armor,
         spd=arch.spd, base_spd=arch.spd, atb=0, flash=0, hurt=0, phase="enter", phase_t=0, x=DESIGN_W+60, dots={}, debuffs={} }
+end
+-- boss(副本用)：固定等级 + 大倍率，靠 family/机制逼不同 build。lvl 由副本 min_lvl 给。
+function combat.make_boss(boss_id, lvl)
+    local b = BOSSES[boss_id] or BOSSES.alpha_wolf
+    local fam = ENEMY_FAMILY[b.family] or ENEMY_FAMILY.beast
+    local scale = 1 + (lvl-1)*0.22
+    local hp = math.floor(60*b.hp*scale)
+    local armor = math.floor(20*b.armor*scale*(fam.armor_mul or 1))
+    return { arch_id=boss_id, family=b.family, name=b.name, color=b.color, level=lvl, rank="boss", is_boss=true,
+        mech=b.mech, tip=b.tip,
+        max_hp=hp, hp=hp, attack=math.floor(8*b.dmg*scale), armor=armor, base_armor=armor,
+        spd=b.spd, base_spd=b.spd, atb=0, flash=0, hurt=0, phase="enter", phase_t=0, x=DESIGN_W+60, dots={}, debuffs={} }
 end
 function combat.next_enemy()
     state.stage=state.stage+1
@@ -193,7 +207,9 @@ function combat.kill_enemy()
     if rank=="elite" then fx.add_float(state.enemy.x,DESIGN_H*0.12,"精英击破!",UI.gold,1.4)
     elseif rank=="rare" then fx.add_float(state.enemy.x,DESIGN_H*0.12,"稀有击破!",{0.78,0.5,1.0},1.4)
     else fx.add_float(state.enemy.x,DESIGN_H*0.12,"DEFEATED",UI.gold,1.2) end
-    fx.shake=math.min(14,fx.shake+(rank=="normal" and 6 or 10)); combat.drop_loot()
+    fx.shake=math.min(14,fx.shake+(rank=="normal" and 6 or 10))
+    -- 副本里击杀不走区域掉落/经验(由副本结算统一发肥包)；普通战斗才掉
+    if not state.dungeon_run then combat.drop_loot() end
 end
 
 -- 技能大师：学习 master 类技能（扣金币+材料）
@@ -264,13 +280,17 @@ end
 function combat.enemy_attack()
     local dmg=math.max(1, state.enemy.attack*(1-combat.mitigation(state.player.armor)))
     state.player.hp=state.player.hp-dmg; fx.add_float(DESIGN_W*0.18,DESIGN_H*0.16,"-"..math.floor(dmg),UI.bad); fx.shake=math.min(14,fx.shake+5)
-    if state.player.hp<=0 then state.player.hp=0; state.result_banner="defeat" end
+    if state.player.hp<=0 then
+        state.player.hp=0
+        -- 副本里阵亡 → 标记副本失败(由 dungeon.tick 结算安慰产出)，不走通用复活幕
+        if state.dungeon_run then state.dungeon_run.failed=true else state.result_banner="defeat" end
+    end
 end
 
 -- 战斗挂机 tick：抛射物推进 / 敌人入场死亡相位 / DOT / 自动药剂 / ATB 对决。
 -- 仅在 activity=="combat" 时由主循环调用；非战斗推进的通用部分（冷却/mp/活动 tick）留在主循环。
 function combat.tick(dt)
-    if not state.enemy then combat.next_enemy() end
+    if not state.enemy then if state.dungeon_run then return else combat.next_enemy() end end
     if #state.projectiles>0 then
         local k=math.min(1,dt*18)
         for i=#state.projectiles,1,-1 do local p=state.projectiles[i]
@@ -285,7 +305,7 @@ function combat.tick(dt)
         state.enemy.x=DESIGN_W+60+(ENEMY_HOME_X-(DESIGN_W+60))*e; if k>=1 then state.enemy.phase="fight"; state.enemy.x=ENEMY_HOME_X end
         return
     end
-    if state.enemy.phase=="dying" then state.enemy.phase_t=state.enemy.phase_t+dt; if state.enemy.phase_t>=DEATH_TIME then combat.next_enemy() end; return end
+    if state.enemy.phase=="dying" then state.enemy.phase_t=state.enemy.phase_t+dt; if state.enemy.phase_t>=DEATH_TIME then if state.dungeon_run then state.enemy=nil else combat.next_enemy() end end; return end
     -- 减益(冰减速/破甲)计时：过期移除并重算对 spd/armor 的影响
     if state.enemy.debuffs and #state.enemy.debuffs>0 then
         local changed=false

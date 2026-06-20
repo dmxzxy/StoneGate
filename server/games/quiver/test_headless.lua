@@ -250,6 +250,94 @@ do
   check("读档 forge_bp 复原", fp.forge_bp=="fg_iron_chest")
 end
 
+-- ===== C5 副本（许可恢复 + 进入/波次/boss/结算 + 存档）白盒 =====
+do
+  local D = require("data")
+  local inv = require("sys.inventory")
+  local prog = require("sys.progression")
+  local combat = require("sys.combat")
+  local dungeon = require("sys.dungeon")
+  local st = require("core.state")
+  S.init()
+  -- 数据登记
+  check("DUNGEONS 表非空", type(D.DUNGEONS)=="table" and #D.DUNGEONS>0)
+  check("DUNGEON 索引可查", D.DUNGEON.darkwood_warren~=nil)
+  check("BOSSES 登记(alpha_wolf)", D.BOSSES.alpha_wolf~=nil and D.BOSSES.alpha_wolf.family~=nil)
+  check("钥匙材料 iron_key 有名/色", D.MAT_NAME.iron_key~=nil and D.MAT_COLOR.iron_key~=nil)
+  -- 许可默认满 + 字段就位
+  check("energy 默认满", st.player.energy==st.player.energy_max and st.player.energy_max==D.ENERGY_MAX)
+  check("last_time 已铺", st.player.last_time~=nil)
+  -- 许可时间恢复(在线 update)：先扣再 update 一段时间应回涨
+  st.player.energy = 10
+  dungeon.update(3600)  -- 模拟一小时(满恢复)
+  check("许可随时间恢复(封顶)", st.player.energy>10 and st.player.energy<=st.player.energy_max)
+  -- 离线折算：把 last_time 拨回过去 + 拉低许可，catch_up 应补足
+  st.player.energy = 0
+  local saved_getTime = love.timer.getTime
+  local NOW = 100000
+  love.timer.getTime = function() return NOW end
+  st.player.last_time = NOW - 3600   -- 1 小时前
+  dungeon.catch_up()
+  check("离线时间折算恢复许可", st.player.energy>0)
+  love.timer.getTime = saved_getTime
+  -- make_boss：固定等级大倍率 + family/机制
+  local boss = combat.make_boss("stone_lord", 20)
+  check("make_boss 带 is_boss/family/big hp", boss.is_boss==true and boss.family=="construct" and boss.hp>200)
+  -- make_enemy 接受 lvl_override(副本波次小怪)
+  st.region = D.REGIONS[1]; st.stage=0
+  local mob = combat.make_enemy("wolf","normal", 20)
+  check("make_enemy lvl_override 生效", mob.level==20)
+  -- 进入门槛：许可不足/缺钥匙拒绝
+  local dg = D.DUNGEON.quarry_depths   -- 中级，需 iron_key
+  st.player.level = 60                  -- 等级够(解锁)
+  st.player.energy = 0
+  st.player.inv = {}
+  local can1 = dungeon.can_enter(dg)
+  check("许可不足不可进入", can1==false)
+  st.player.energy = st.player.energy_max
+  local can2 = dungeon.can_enter(dg)
+  check("缺钥匙不可进入(需 iron_key)", can2==false)
+  inv.inv_add("mat","iron_key",1)
+  local can3 = dungeon.can_enter(dg)
+  check("许可+钥匙齐备可进入", can3==true)
+  -- 进入：扣许可+钥匙、建运行态、切到波次1
+  local e0 = st.player.energy
+  check("dungeon.enter 成功", dungeon.enter(dg)==true)
+  check("进入扣许可", st.player.energy == e0 - dg.cost_energy)
+  check("进入扣钥匙", inv.inv_count("mat","iron_key")==0)
+  check("运行态建立(波次1/有敌)", st.dungeon_run~=nil and st.dungeon_run.phase=="wave" and st.dungeon_run.wave==1 and st.enemy~=nil)
+  -- 推进副本到通关：给玩家超强属性，跑足够帧逐波清完+boss
+  st.player.base_str=99999; st.player.base_sta=99999; prog.recalc(); st.player.hp=st.player.max_hp
+  st.player.ammo_cap=4; st.player.ammo={}; inv.ammo_add_arrow("void","pierce","eagle",9999); prog.recalc()
+  local guard=0
+  while st.dungeon_run and guard<4000 do dungeon.tick(0.05); guard=guard+1 end
+  check("副本推进到结算(run 清空)", st.dungeon_run==nil)
+  check("结算弹窗存在", st.dungeon_result~=nil)
+  check("通关(win=true)", st.dungeon_result and st.dungeon_result.win==true)
+  check("结算给经验大包", st.dungeon_result and st.dungeon_result.xp == dg.min_lvl*60)
+  -- 失败安慰：阵亡走 consolation
+  S.init(); st.player.level=60; st.player.energy=st.player.energy_max
+  inv.inv_add("mat","iron_key",1)
+  dungeon.enter(dg)
+  st.player.base_str=1; st.player.base_sta=1; prog.recalc(); st.player.hp=1
+  -- 玩家极弱：第一波就会被打死(标 failed)；多 tick 推进直到结算
+  local g2=0
+  while st.dungeon_run and g2<4000 do
+    st.player.hp = math.min(st.player.hp, 1)   -- 持续压血，确保挨打即死
+    dungeon.tick(0.05); g2=g2+1
+  end
+  check("阵亡后副本失败结算", st.dungeon_result~=nil and st.dungeon_result.win==false)
+  -- 存档持久化 energy/last_time
+  S.init()
+  st.player.energy = 42; st.player.last_time = 555
+  check("save.write(含 energy) 成功", S.save.write()==true)
+  st.player.energy = 0; st.player.last_time = 0
+  check("save.load(含 energy) 成功", S.save.load()==true)
+  local ep = S.state().player
+  check("读档 energy 复原(允许时间恢复后>=42)", ep.energy>=42)
+  check("读档 last_time 刷新到当前", ep.last_time~=nil)
+end
+
 -- ===== helium require 烟测（验证 mock love 桩对未来 UI 阶段够用）=====
 -- 后续阶段 main.lua 将 require("helium")。helium core/input.lua 在 require 期会
 -- 读 love.handlers 做 orig 快照并写回包裹函数；atlas/element 捕获 love.graphics.*。

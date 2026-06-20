@@ -37,6 +37,7 @@ local prog = require("sys.progression")
 local combat = require("sys.combat")
 local gather = require("sys.gather")
 local craft = require("sys.craft")
+local dungeon = require("sys.dungeon")
 local input = require("core.input")
 -- view 层：HUD + 各活动场景 + 各面板（draw/hit）
 local hud_helium = require("view.hud_helium")  -- 新主 HUD（helium 元素，替代旧 view/hud 的顶/底栏）
@@ -47,6 +48,7 @@ local rest_view = require("view.rest_view")
 local bag_view = require("view.bag_view")
 local equip_view = require("view.equip_view")
 local region_view = require("view.region_view")
+local dungeon_view = require("view.dungeon_view")
 local activity_view = require("view.activity_view")
 local skills_view = require("view.skills_view")
 local tooltip = require("view.tooltip")
@@ -88,6 +90,13 @@ local function update(dt)
     for i=#state.player.buffs,1,-1 do state.player.buffs[i].t=state.player.buffs[i].t-dt; if state.player.buffs[i].t<=0 then table.remove(state.player.buffs,i) end end
     -- 法力回复（战斗内外都回，封顶 max_mp）
     if state.player.mp and state.player.max_mp then state.player.mp=math.min(state.player.max_mp, state.player.mp + MP_REGEN*dt) end
+    -- 探险许可恢复（随时间涨，离线也算；last_time 跟随）
+    dungeon.update(dt)
+
+    -- 副本进行中：独立推进(波次/boss/结算)，盖过普通挂机活动
+    if state.dungeon_run then dungeon.tick(dt); return end
+    -- 结算弹窗弹出时暂停推进(等玩家确认)
+    if state.dungeon_result then return end
 
     -- 当前挂机活动（一次只挂一种）
     activity_tick(dt)
@@ -105,6 +114,8 @@ end
 local function init()
     state.player = { level=1, xp=0, xp_next=xp_need(1), base_str=5, base_agi=5, base_sta=5,
         gold=0, hp=nil, mp=nil, equip={}, inv={}, ammo={}, ammo_cap=0, atb=0,
+        -- 探险许可(副本进入成本，随时间恢复；离线靠 last_time 折算)
+        energy=D.ENERGY_MAX, energy_max=D.ENERGY_MAX, last_time=(love.timer and love.timer.getTime and love.timer.getTime()) or os.time(),
         -- 采集职业：独立等级 + 经验（靠采集攒经验升级，与角色等级分离）
         skill={ woodcut={lvl=1,xp=0}, mining={lvl=1,xp=0}, herb={lvl=1,xp=0} },
         -- 制造职业：独立，做工攒经验升级（不进 skill 表）
@@ -126,6 +137,7 @@ local function init()
     state.player.hp=state.player.max_hp
     state.region=REGIONS[1]; state.stage=0; fx.floats={}; fx.particles={}; state.projectiles={}; state.result_banner=nil; fx.toast=nil
     state.activity="rest"; state.panel_open=nil; state.enemy=nil
+    state.dungeon_run=nil; state.dungeon_result=nil
 end
 
 -- ============================================================================
@@ -135,7 +147,7 @@ end
 -- 收进单个 save 表（避免主 chunk 触及 Lua 200 局部变量上限；文件拆分后会移到 base/save.lua）
 local save = {}
 save.FILE = "quiver/save.lua"
-save.VERSION = 5
+save.VERSION = 6
 local save_timer = 0
 
 -- 序列化一个纯数据值（数字/字符串/布尔/表）到 out 数组
@@ -176,6 +188,7 @@ function save.snapshot()
         equip=state.player.equip, inv=inv, ammo=ammo,
         skill=state.player.skill, craft=state.player.craft, craft_bp=state.player.craft_bp,
         forge=state.player.forge, forge_bp=state.player.forge_bp,
+        energy=state.player.energy, energy_max=state.player.energy_max, last_time=state.player.last_time,
         bp_known=state.player.bp_known, skills=state.player.skills,
         activity=state.activity, region_id=state.region.id, stage=state.stage,
     }
@@ -243,6 +256,11 @@ function save.migrate(data)
     if v < 5 then
         data.version = 5
     end
+    -- v5→v6：副本(C5)。旧档无 energy/last_time/钥匙 → load 期由 init() 默认补全
+    --   (energy 满许可 / last_time=当前)，钥匙是普通背包材料按 D.MAT_NAME 校验保留。无需改 data。
+    if v < 6 then
+        data.version = 6
+    end
     return data
 end
 
@@ -268,6 +286,10 @@ function save.load()
         -- 锻造职业：旧档无 forge → 用 init() 默认；forge_bp 校验存在性
         state.player.forge = data.forge or state.player.forge
         state.player.forge_bp = (data.forge_bp and BP[data.forge_bp]) and data.forge_bp or "fg_copper"
+        -- 探险许可：复原账本，再按 last_time 折算离线恢复(catch_up 在 recalc 后调)
+        state.player.energy_max = data.energy_max or D.ENERGY_MAX
+        state.player.energy = data.energy or state.player.energy_max
+        state.player.last_time = data.last_time or ((love.timer and love.timer.getTime and love.timer.getTime()) or os.time())
         -- 已知图谱/已学技能：按当前表过滤掉已删除的 id（防改表后崩）
         state.player.bp_known = {}; for id in pairs(data.bp_known or {}) do if BP[id] then state.player.bp_known[id]=true end end
         -- start 类图谱(燧石箭/铜锭/铜甲/铜短弓...)始终保底已知(旧档无锻造起始配方也补上)
@@ -290,9 +312,11 @@ function save.load()
         state.stage = data.stage or 0
         -- 瞬时态清空
         state.player.gather_node=nil; state.player.cd={}; state.player.buffs={}; state.player.cast_flash={}; state.player.atb=0; state.enemy=nil
+        state.dungeon_run=nil; state.dungeon_result=nil
         -- hp/mp 必须在 recalc 之前赋（recalc 有 nil/超上限钳制）
         state.player.hp = data.hp; state.player.mp = data.mp
         recalc()
+        dungeon.catch_up()   -- 折算离线时间恢复探险许可
     end)
     return ok
 end
@@ -301,6 +325,8 @@ end
 -- 绘制：按当前活动 kind 画场景 + HUD，再按 panel_open 叠面板/tooltip/拖拽/死亡幕。
 -- ============================================================================
 local function draw_main()
+    -- 副本进行中：复用战斗场景画弓手/敌/boss/抛射物(波次进度由 dungeon_view 叠在上层)
+    if state.dungeon_run then combat_view.draw(); fx.draw_particles(); return end
     local a = ACTIVITIES[state.activity]
     if a.kind=="combat" then combat_view.draw()
     elseif a.kind=="gather" then gather_view.draw()
@@ -346,11 +372,13 @@ function love.draw()
     love.graphics.push(); love.graphics.translate(ox,oy)
     draw_main()
     fx.draw_floats()   -- 跳字（在 HUD/面板覆盖之下，与旧行为同序）
-    -- helium HUD：顶部角色卡始终画；底部入口栏仅无面板时激活（开面板则不画且其点击订阅失活）
+    -- helium HUD：顶部角色卡始终画；底部入口栏仅无面板且无副本流程时激活
     hud_el.top:draw(0,0)
-    if state.panel_open then hud_el.bottom:undraw() else hud_el.bottom:draw(0,0) end
+    local in_dungeon = state.dungeon_run or state.dungeon_result
+    if state.panel_open or in_dungeon then hud_el.bottom:undraw() else hud_el.bottom:draw(0,0) end
     if hud_scene then hud_scene:draw() end
     if state.panel_open=="region" then region_view.draw()
+    elseif state.panel_open=="dungeon" or in_dungeon then dungeon_view.draw()
     elseif state.panel_open=="activity" then activity_view.draw()
     elseif state.panel_open=="skills" then skills_view.draw()
     elseif state.panel_open=="bag" then bag_view.draw(); tooltip.draw_tooltip()

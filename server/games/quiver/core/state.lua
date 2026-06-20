@@ -18,8 +18,11 @@ state.projectiles = {}
 state.region = nil           -- 当前地区（REGIONS 元素引用；存档只存 id 查回）
 state.stage = 0              -- 当前关卡推进计数
 state.activity = "rest"      -- 当前挂机活动：rest|woodcut|mining|herb|fletch|combat
+-- 副本运行态（瞬时，不进存档；进入副本时由 sys/dungeon 建立，结算后清）
+state.dungeon_run = nil      -- {dg, lvl, wave, total, phase="wave"/"boss"/"win"/"lose", killed, failed}
+state.dungeon_result = nil   -- 结算弹窗：{dg, win, xp, loot={...}, mats={...}}
 -- UI 覆盖态
-state.panel_open = nil       -- 覆盖菜单：nil|"activity"|"bag"|"equip"|"region"|"skills"
+state.panel_open = nil       -- 覆盖菜单：nil|"activity"|"bag"|"equip"|"region"|"skills"|"dungeon"
 state.result_banner = nil    -- nil|"defeat"
 state.tooltip = nil          -- 物品详情：{kind=, ...}
 state.drag = nil             -- 拖拽中：{from="bag"/"equip"/"ammo", slot=, item=, x=, y=, moved=}

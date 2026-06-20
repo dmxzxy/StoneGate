@@ -537,6 +537,69 @@ D.ENEMY_RANK = {
 D.NODE_BASE = { wood={hp=1.0,yield=1.0}, ore={hp=1.4,yield=0.8}, herb={hp=0.8,yield=0.9} }
 D.MAT_REQ_FAIL = { wood="树木等级不足", ore="矿石等级不足", herb="草药等级不足" }
 
+-- ============================================================================
+-- 副本系统(§6)：后期主循环。一个副本 = 固定波次小怪 + 1 boss，用当前 build 自动打。
+--   进入成本：探险许可 energy(随时间恢复，离线也涨，封顶) + 可选 boss 钥匙(掉落)。
+--   结算：经验大包(boss_level*60) + 肥掉落表(保底 rare+、unique 武器、特殊材料、钥匙)。
+-- ============================================================================
+-- 探险许可(energy)：随时间恢复，离线也算(基于 last_time 时间戳)。
+D.ENERGY_MAX = 100          -- 许可封顶
+D.ENERGY_REGEN = 100/3600   -- 每秒恢复量(满恢复 ≈1 小时；离线照算)
+
+-- boss 钥匙材料(高档副本要钥匙作第二轨)。掉落于对应档副本，作特殊掉落。
+D.DUNGEON_KEYS = {
+    iron_key  = { name="铁牢钥匙",   color={0.7,0.74,0.8},  desc="开启中级副本的钥匙。副本 boss 掉落。" },
+    ember_key = { name="熔火钥匙",   color={0.95,0.5,0.25}, desc="开启高级熔狱类副本的钥匙。boss 掉落。" },
+    void_key  = { name="虚空之钥",   color={0.6,0.4,0.75},  desc="开启顶级副本的钥匙。极稀有 boss 掉落。" },
+}
+for id,k in pairs(D.DUNGEON_KEYS) do D.MAT_NAME[id]=k.name; D.MAT_COLOR[id]=k.color; D.MAT_DESC[id]=k.desc end
+
+-- boss 敌型(用 family + 机制系数逼不同 build)：
+--   hp/dmg/armor/spd 是相对 ENEMY_ARCH 的基底(boss 在 make_boss 里再 ×大倍率)。
+--   mech 标记主要机制(展示提示)：high_armor(逼穿甲/弩) / high_freq(逼叠层短弓/AOE) / element(逼对应抗性箭)。
+D.BOSSES = {
+    alpha_wolf  = { name="头狼·铁牙",   family="beast",    hp=8,  dmg=1.4, armor=0.5, spd=1.0, color={0.55,0.55,0.62}, mech="high_freq", tip="出手频繁，宜叠层短弓/群体箭" },
+    bog_horror  = { name="沼骇",         family="undead",   hp=10, dmg=1.6, armor=0.6, spd=0.7, color={0.5,0.6,0.45}, mech="element", tip="不死，火/净化箭克之" },
+    stone_lord  = { name="磐石领主",     family="construct",hp=14, dmg=1.5, armor=1.6, spd=0.5, color={0.6,0.62,0.7},  mech="high_armor", tip="重甲，穿甲/破甲/弩破之" },
+    frost_queen = { name="冰霜女王",     family="elemental",hp=13, dmg=1.8, armor=0.7, spd=0.8, color={0.6,0.85,0.97}, mech="element", tip="冰抗高，火/物理破之" },
+    lava_tyrant = { name="熔岩暴君",     family="elemental",hp=16, dmg=2.0, armor=0.9, spd=0.65,color={0.9,0.45,0.25}, mech="element", tip="火抗高，冰/物理/穿甲破之" },
+    void_warden = { name="虚空守望者",   family="void",     hp=18, dmg=2.1, armor=1.0, spd=0.75,color={0.6,0.4,0.75},  mech="element", tip="净化箭重创，全能 build 通吃" },
+    throne_king = { name="陨灭之王",     family="dragon",   hp=24, dmg=2.3, armor=1.4, spd=0.7, color={0.8,0.45,0.35}, mech="high_armor", tip="毕业级：高甲高频，毕业 build 试金石" },
+}
+
+-- 副本表：按地区进度解锁(unlock=region id)。tier 用于分组展示。
+--   min_lvl 推荐等级；waves 小怪波数；boss=D.BOSSES id；mobs=波次小怪取自该表(无则用解锁区 enemies)。
+--   cost_energy 进入耗许可；key 需要的钥匙材料 id(nil=只耗许可)。
+--   drops：rar_floor 保底稀有度、unique_chance 命名武器概率、mats 特殊材料保底量、key_chance boss 钥匙掉率。
+D.DUNGEONS = {
+    -- ---- 低级(low) ----
+    { id="darkwood_warren", name="幽林兽穴", tier="low",  min_lvl=8,  waves=3, boss="alpha_wolf",  unlock="darkwood", cost_energy=18, key=nil,
+      mobs={"wolf","boar","bat"},
+      drops={ rar_floor="rare", unique_chance=0.04, mats={feather=4, oil=2, hide=3}, key_chance=0 } },
+    { id="sunken_crypt",    name="沉没墓窖", tier="low",  min_lvl=13, waves=3, boss="bog_horror",  unlock="fen",      cost_energy=22, key=nil,
+      mobs={"wraith","bug","ogre"},
+      drops={ rar_floor="rare", unique_chance=0.06, mats={venomsac=3, oil=3, bladestone=2}, key_chance=0.12, key_id="iron_key" } },
+    -- ---- 中级(mid) ----
+    { id="quarry_depths",   name="碎石深坑", tier="mid",  min_lvl=20, waves=4, boss="stone_lord",  unlock="hollow",   cost_energy=28, key="iron_key",
+      mobs={"golem","gargoyle","wraith"},
+      drops={ rar_floor="epic", unique_chance=0.10, mats={bladestone=4, sulfur=3, leather=2}, key_chance=0.10, key_id="iron_key" } },
+    { id="frozen_hall",     name="冰封殿堂", tier="mid",  min_lvl=27, waves=4, boss="frost_queen", unlock="peak",     cost_energy=32, key="iron_key",
+      mobs={"icewolf","golem","wraith"},
+      drops={ rar_floor="epic", unique_chance=0.12, mats={hide=4, oil=3, leather=3}, key_chance=0.12, key_id="ember_key" } },
+    -- ---- 高级(high) ----
+    { id="cinder_forge",    name="熔狱熔炉", tier="high", min_lvl=45, waves=5, boss="lava_tyrant",  unlock="cinder",   cost_energy=40, key="ember_key",
+      mobs={"lava","drake","golem"},
+      drops={ rar_floor="epic", unique_chance=0.18, mats={oil=5, sulfur=4, leather=4}, key_chance=0.12, key_id="ember_key" } },
+    { id="void_breach",     name="虚空裂隙", tier="high", min_lvl=52, waves=5, boss="void_warden",  unlock="rift",     cost_energy=46, key="ember_key",
+      mobs={"voidcat","revenant","lich"},
+      drops={ rar_floor="legendary", unique_chance=0.22, mats={venomsac=5, hide=5, leather=5}, key_chance=0.10, key_id="void_key" } },
+    { id="throne_sanctum",  name="王座圣所", tier="high", min_lvl=58, waves=6, boss="throne_king",  unlock="throne",   cost_energy=55, key="void_key",
+      mobs={"drake","revenant","voidcat","golem"},
+      drops={ rar_floor="legendary", unique_chance=0.30, mats={oil=6, leather=6, hide=6}, key_chance=0.06, key_id="void_key" } },
+}
+D.DUNGEON = {}; for _,dg in ipairs(D.DUNGEONS) do D.DUNGEON[dg.id]=dg end
+-- 副本分组展示顺序(沿用 TIER_ORDER：low/mid/high)
+
 D.UI = {
     bg={0.07,0.08,0.12}, panel={0.12,0.13,0.19,0.97}, line={0.26,0.28,0.36},
     text={0.93,0.94,0.97}, dim={0.55,0.57,0.64}, good={0.4,0.85,0.5}, bad={0.88,0.3,0.3},

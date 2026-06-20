@@ -58,6 +58,11 @@ function region_view.draw()
     local px,py,pw,ph,y0,y1 = region_viewport(); panel(px,py,pw,ph,{0.09,0.1,0.15,0.98},UI.line,10*sw)
     love.graphics.setFont(draw.font_med); setc(UI.text); love.graphics.printf("地区",px,py+sy(8),pw,"center")
     draw.close_x(px,py,pw)
+    -- 左上"副本"入口：开副本面板(复用地区页作 hub，避免底部第6入口拥挤)
+    do
+        local bx,by,bw,bh = px+sx(10), py+sy(9), sx(64), sy(26)
+        button(bx,by,bw,bh,"副本",{0.6,0.4,0.65},true,draw.font_sm)
+    end
     region_view.clamp_scroll()
     local entries = region_layout()
     love.graphics.setScissor(px, y0, pw, y1-y0)
@@ -95,6 +100,8 @@ end
 function region_view.press(x,y)
     local px,py,pw,ph,y0,y1 = region_viewport()
     if draw.hit_close_x(x,y,px,py,pw) then state.panel_open=nil; return true end
+    -- "副本"入口：切到副本面板
+    if hit(x,y, px+sx(10), py+sy(9), sx(64), sy(26)) then state.panel_open="dungeon"; return true end
     if hit(x,y,px+pw/2-sx(64),py+ph-sy(40),sx(128),sy(30)) then state.panel_open=nil; return true end
     if y>=y0 and y<=y1 then state.region_drag={ y0=y, s0=state.region_scroll, moved=false } end
     return true

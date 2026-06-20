@@ -15,6 +15,7 @@ local bag_view = require("view.bag_view")
 local equip_view = require("view.equip_view")
 local region_view = require("view.region_view")
 local craft_view = require("view.craft_view")
+local dungeon_view = require("view.dungeon_view")
 
 local function sx(v) return v*screen.sw end
 local function sy(v) return v*screen.sh end
@@ -27,6 +28,8 @@ local input = {}
 
 function input.press(x,y)
     if state.result_banner=="defeat" then state.player.hp=state.player.max_hp; state.result_banner=nil; state.activity="rest"; state.enemy=nil; return end
+    -- 副本流程(战斗中/结算)：无论是否开了面板，点击都先交给副本视图(放弃/确定/列表)
+    if state.dungeon_run or state.dungeon_result then dungeon_view.press(x,y); return end
     local w,h=love.graphics.getWidth(),love.graphics.getHeight()
     if not state.panel_open then
         -- 制造挂机中：点下半屏图谱卡 = 选图谱并持续制造
@@ -39,6 +42,8 @@ function input.press(x,y)
         for i,id in ipairs(ids) do if hit(x,y, sx(10)+(i-1)*(bw+gap), by, bw, sy(36)) then state.panel_open=id; return end end
     elseif state.panel_open=="region" then
         region_view.press(x,y)
+    elseif state.panel_open=="dungeon" then
+        dungeon_view.press(x,y)
     elseif state.panel_open=="activity" then
         activity_view.hit(x,y)
     elseif state.panel_open=="skills" then
