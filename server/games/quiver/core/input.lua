@@ -13,6 +13,7 @@ local activity_view = require("view.activity_view")
 local skills_view = require("view.skills_view")
 local bag_view = require("view.bag_view")
 local equip_view = require("view.equip_view")
+local mastery_view = require("view.mastery_view")
 local region_view = require("view.region_view")
 local craft_view = require("view.craft_view")
 local dungeon_view = require("view.dungeon_view")
@@ -50,6 +51,8 @@ function input.press(x,y)
         skills_view.hit(x,y)
     elseif state.panel_open=="equip" then
         equip_view.hit(x,y)
+    elseif state.panel_open=="mastery" then
+        mastery_view.hit(x,y)
     elseif state.panel_open=="bag" then
         bag_view.press(x,y)
     end

@@ -46,6 +46,21 @@ function prog.recalc()
     if sig_haste>0 then state.player.atk_speed = state.player.atk_speed * (1 + sig_haste) end
     -- 暴击 = 基础 + 敏捷 + 词缀暴击 + 武器内置/签名暴击(crit_innate)
     state.player.crit      = math.min(0.6, 0.05 + state.player.agi*0.0004 + (a.crit_pct or 0)*0.01 + (a.crit_innate or 0))
+    -- 战斗精通(满级软成长)：攻击/急速乘算、暴击加算、采集另在 gather 取。每级 +0.5%。
+    local MP = D.MASTERY_PER_POINT
+    local m = state.player.mastery
+    if m then
+        local a_lv, h_lv, c_lv = m.attack or 0, m.haste or 0, m.crit or 0
+        if a_lv>0 then
+            local mul = 1 + a_lv*MP
+            state.player.atk_min = math.floor(state.player.atk_min*mul)
+            state.player.atk_max = math.floor(state.player.atk_max*mul)
+            state.player.atk_mid = (state.player.atk_min + state.player.atk_max)/2
+            state.player.attack  = state.player.atk_mid
+        end
+        if h_lv>0 then state.player.atk_speed = state.player.atk_speed * (1 + h_lv*MP) end
+        if c_lv>0 then state.player.crit = math.min(0.6, state.player.crit + c_lv*MP) end
+    end
     state.player.max_hp    = 60 + state.player.sta*6
     if state.player.hp==nil or state.player.hp>state.player.max_hp then state.player.hp=state.player.max_hp end
     -- 法力：独立池，随等级长（不占用基础属性）
@@ -69,7 +84,9 @@ end
 -- ============================================================================
 -- 角色升级
 -- ============================================================================
-function prog.xp_need(lv) return math.floor(80*(lv^1.6)) end
+function prog.xp_need(lv) return math.floor(55*(lv^2.15)) end
+-- 满级(60)后每多少 xp 转 1 精通点(= 满级单级 xp 需求)。
+function prog.mastery_step() return prog.xp_need(D.LEVEL_CAP) end
 -- 角色升到一定等级自动学会技能（learn.lvl 类）
 function prog.check_skill_unlock()
     for _,id in ipairs(SKILL_ORDER) do local s=SKILLS[id]
@@ -81,7 +98,8 @@ function prog.check_skill_unlock()
 end
 function prog.gain_xp(amount)
     state.player.xp = state.player.xp + amount
-    while state.player.xp >= state.player.xp_next do
+    -- 未满级：正常升级；满级(LEVEL_CAP)后 xp 不再升级，转「战斗精通」点(每 mastery_step 一点)。
+    while state.player.level < D.LEVEL_CAP and state.player.xp >= state.player.xp_next do
         state.player.xp = state.player.xp - state.player.xp_next
         state.player.level = state.player.level + 1
         state.player.base_str = state.player.base_str + 2
@@ -91,6 +109,37 @@ function prog.gain_xp(amount)
         fx.floats[#fx.floats+1]={ x=DESIGN_W*0.18, y=DESIGN_H*0.14, text="LEVEL "..state.player.level, color=UI.xp, timer=1.4, scale=1.4, vy=-50 }
         prog.check_skill_unlock()
     end
+    if state.player.level >= D.LEVEL_CAP then
+        -- 满级：xp 池每攒满 mastery_step 转 1 精通点(温和无限成长)
+        state.player.mastery = state.player.mastery or { points=0 }
+        local step = prog.mastery_step()
+        while state.player.xp >= step do
+            state.player.xp = state.player.xp - step
+            state.player.mastery.points = (state.player.mastery.points or 0) + 1
+            fx.floats[#fx.floats+1]={ x=DESIGN_W*0.18, y=DESIGN_H*0.14, text="+1 精通", color=UI.gold, timer=1.4, scale=1.3, vy=-50 }
+        end
+        state.player.xp_next = step   -- 展示用：满级后进度条对齐到精通步长
+    end
+end
+
+-- ============================================================================
+-- 战斗精通(满级软成长)：投点 → 永久小幅加成。recalc 读 player.mastery 换算。
+-- ============================================================================
+-- 某精通已投级数
+function prog.mastery_level(id) local m=state.player.mastery; return (m and m[id]) or 0 end
+-- 精通乘子(1 + 级数×每点)：采集等"非 recalc 派生量"在各 sys 直接乘上。
+function prog.mastery_mul(id) return 1 + prog.mastery_level(id)*D.MASTERY_PER_POINT end
+-- 投一级精通(扣点，成本随已投级数递增)。点不够则不变。
+function prog.spend_mastery(id)
+    if not D.MASTERY[id] then return end
+    state.player.mastery = state.player.mastery or { points=0 }
+    local m = state.player.mastery
+    local owned = m[id] or 0
+    local cost = D.mastery_cost(owned)
+    if (m.points or 0) < cost then return end
+    m.points = m.points - cost
+    m[id] = owned + 1
+    prog.recalc()
 end
 
 -- ============================================================================

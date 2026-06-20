@@ -35,7 +35,7 @@ function gather.make_node(mat)
 end
 function gather.finish_node(nd, key)
     local lvl = state.player.skill[key].lvl
-    local y = math.max(1, math.floor(NODE_BASE[nd.mat].yield * (1+nd.level*0.18) * (1+(lvl-1)*0.04)))
+    local y = math.max(1, math.floor(NODE_BASE[nd.mat].yield * (1+nd.level*0.18) * (1+(lvl-1)*0.04) * prog.mastery_mul("gather")))
     if nd.rich then y = y*2 end
     inv.inv_add("mat", nd.kind, y)   -- 产出具体材料(该档随机一系)，不再归并大类
     -- 砍柴小概率掉鸟巢羽毛(所有箭必需的低门槛二级材料)
@@ -75,7 +75,7 @@ function gather.node_machine(dt)
         end
     elseif nd.phase == "harvest" then
         nd.flash=math.max(0,nd.flash-dt); nd.hurt=math.max(0,nd.hurt-dt)
-        local hs = 0.9 * (1 + (state.player.skill[key].lvl-1)*0.05)   -- 职业越高采得越快
+        local hs = 0.9 * (1 + (state.player.skill[key].lvl-1)*0.05) * prog.mastery_mul("gather")   -- 职业越高/采集精通越高采得越快
         nd.atb = nd.atb + hs*dt
         if nd.atb >= 1 then
             nd.atb = 0; nd.dur = nd.dur - 1; nd.flash=0.1; nd.hurt=0.2; fx.shake=math.min(8,fx.shake+1)

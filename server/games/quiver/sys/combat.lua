@@ -74,7 +74,9 @@ function combat.next_enemy()
 end
 
 function combat.drop_loot()
-    prog.gain_xp(math.floor(state.enemy.level*6+10))
+    -- 战斗 xp = floor(enemy_level*4)；精英 ×2、稀有 ×4(去掉旧 +10 平铺，让高区更值)
+    local xp_mul = (state.enemy.rank=="elite") and 2 or (state.enemy.rank=="rare") and 4 or 1
+    prog.gain_xp(math.floor(state.enemy.level*4)*xp_mul)
     state.player.gold = state.player.gold + math.floor(state.enemy.level*2+math.random(1,4))
     -- 战斗给经验/金币/装备 + 少量二级材料(羽毛/油/兽皮/毒囊)；主材靠采集
     local rk = ENEMY_RANK[state.enemy.rank or "normal"]

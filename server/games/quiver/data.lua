@@ -8,10 +8,13 @@
 --   1 STR=+1攻击(加到攻击区间) ; 1 AGI=+0.6%攻速(乘在武器攻速上)+0.04%暴击 ; 1 STA=+6生命
 --   装备预算 budget = GEAR_BUDGET * ilvl * rarity.mult * slot.weight
 --   武器 DPS 贡献 = budget * WEAPON_DPS_K（与速度无关）；单发伤害 = 攻击区间随机 × 箭档倍率 × 暴击 × (1-减伤)
---   角色每级 +2力 +2敏 +3耐（慢），经验需求 80*L^1.6
+--   角色每级 +2力 +2敏 +3耐（慢），经验需求 floor(55*L^2.15)，等级上限 60
 -- ============================================================================
 
 local D = {}
+
+-- 等级上限(§0/§1)：到 60 停止升级，溢出 xp 转「战斗精通」点。
+D.LEVEL_CAP = 60
 
 -- ---- 设计空间 / 战斗布景 / 数值锚点常量 ----
 D.DESIGN_W, D.DESIGN_H = 480, 800
@@ -429,6 +432,24 @@ D.SKILLS = {
 }
 D.MP_REGEN = 6   -- 法力每秒回复
 D.SKILL_ORDER = { "shoot","power","double","aimed","poison","rapid","hawkeye","mend" }
+
+-- ============================================================================
+-- 战斗精通(§0/§1 满级软成长)：满级(60)后溢出 xp 每 xp_need(60) 转 1 精通点。
+--   点投入各路线小幅永久加成(每点 +0.5%)，成本递增软上限(花费越多每点越贵)。
+--   recalc 读 player.mastery[id]→换算 pct 加成；不破坏平衡(每路线封顶在 §C6 校准记录)。
+--   amt=每点比例；apply= recalc 里挂哪个派生量；cap_pts=软上限提示(不强制锁,成本递增自然劝退)。
+-- ============================================================================
+D.MASTERY_PER_POINT = 0.005   -- 每点 +0.5%
+D.MASTERIES = {
+    { id="attack",  name="攻击精通", desc="提升攻击力区间(乘算)",       color={0.9,0.45,0.4} },
+    { id="crit",    name="暴击精通", desc="提升暴击率(加算)",           color={1.0,0.7,0.25} },
+    { id="haste",   name="急速精通", desc="提升攻速(乘算)",             color={0.5,0.9,0.9} },
+    { id="gather",  name="采集精通", desc="提升采集产量/速度(乘算)",     color={0.6,0.8,0.5} },
+}
+D.MASTERY = {}; for _,m in ipairs(D.MASTERIES) do D.MASTERY[m.id]=m end
+-- 投入第 (owned+1) 级所需的精通点：owned 越多越贵(软上限)。
+--   cost(owned)=1 + floor(owned/8)：前 8 级 1 点/级、9-16 级 2 点/级…温和递增不锁死。
+function D.mastery_cost(owned) return 1 + math.floor((owned or 0)/8) end
 
 -- 挂机活动：一次只挂一种。group 体现优先级层级：idle(挂机) > combat(战斗) > sub(副职业)。
 D.ACTIVITIES = {

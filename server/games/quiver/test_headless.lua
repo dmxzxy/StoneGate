@@ -338,6 +338,86 @@ do
   check("读档 last_time 刷新到当前", ep.last_time~=nil)
 end
 
+-- ===== C6 经验曲线 + 满级精通(软成长) + 存档 白盒 =====
+do
+  local D = require("data")
+  local prog = require("sys.progression")
+  local st = require("core.state")
+  S.init()
+  -- 曲线公式：xp_need(L)=floor(55*L^2.15)；上限 60
+  check("xp_need 用新曲线(55*L^2.15)", prog.xp_need(10)==math.floor(55*(10^2.15)))
+  check("LEVEL_CAP=60", D.LEVEL_CAP==60)
+  -- 未满级：gain_xp 正常升级
+  st.player.level=1; st.player.xp=0; st.player.xp_next=prog.xp_need(1)
+  prog.gain_xp(prog.xp_need(1)+prog.xp_need(2)+5)
+  check("gain_xp 正常升级(到 Lv3)", st.player.level==3)
+  -- 满级封顶：到 60 不再升级，xp 转精通点
+  st.player.level=D.LEVEL_CAP; st.player.xp=0; st.player.xp_next=prog.xp_need(D.LEVEL_CAP)
+  st.player.mastery={points=0}
+  local step = prog.mastery_step()
+  prog.gain_xp(step*3 + 10)
+  check("满级不再升级(停在 60)", st.player.level==D.LEVEL_CAP)
+  check("满级 xp 转精通点(3 点)", st.player.mastery.points==3)
+  check("精通步长=xp_need(60)", step==prog.xp_need(D.LEVEL_CAP))
+  -- 投点：扣点、加级、recalc 生效(攻击精通提升攻击)
+  st.player.mastery={points=10}
+  st.player.base_str=50; prog.recalc()
+  local atk0 = st.player.atk_max
+  prog.spend_mastery("attack")
+  check("投攻击精通扣点(1点)", st.player.mastery.points==9)
+  check("攻击精通 Lv1", prog.mastery_level("attack")==1)
+  check("攻击精通提升攻击力(recalc)", st.player.atk_max>=atk0)
+  -- 暴击精通：crit 提升
+  st.player.mastery={points=5}; prog.recalc()
+  local crit0 = st.player.crit
+  prog.spend_mastery("crit"); prog.spend_mastery("crit")
+  check("暴击精通提升暴击(+1%)", st.player.crit > crit0)
+  -- 采集精通乘子
+  st.player.mastery={points=5}; prog.spend_mastery("gather")
+  check("mastery_mul(gather)>1", prog.mastery_mul("gather")>1)
+  -- 成本递增：投满 8 级后第 9 级花费=2
+  st.player.mastery={points=999}
+  for _=1,8 do prog.spend_mastery("haste") end
+  check("急速精通投到 Lv8", prog.mastery_level("haste")==8)
+  check("第9级成本递增(=2点)", D.mastery_cost(8)==2)
+  -- 点不足不投
+  st.player.mastery={points=1, haste=8}   -- 第9级要2点，只有1点
+  local hl0 = prog.mastery_level("haste")
+  prog.spend_mastery("haste")
+  check("点不足不投点", prog.mastery_level("haste")==hl0)
+  -- 存档持久化 mastery
+  S.init()
+  st.player.mastery={points=7, attack=3, crit=2}
+  check("save.write(含 mastery) 成功", S.save.write()==true)
+  st.player.mastery={points=0}
+  check("save.load(含 mastery) 成功", S.save.load()==true)
+  local mp = S.state().player
+  check("读档 mastery.points 复原", mp.mastery.points==7)
+  check("读档 mastery.attack 复原", mp.mastery.attack==3)
+  check("读档 mastery.crit 复原", mp.mastery.crit==2)
+  -- 坏 mastery 数据不崩(脏键/非数值被过滤)
+  S.init(); st.player.mastery={points="bad", attack=-5, junk="x"}
+  S.save.write()
+  check("坏 mastery 存档 load 不崩", S.save.load()==true)
+  check("坏 mastery 被清洗(points 兜底)", type(S.state().player.mastery.points)=="number")
+  -- 精通面板 draw/hit 不崩(点投点按钮路径)
+  local mv = require("view.mastery_view")
+  S.init(); st.player.mastery={points=20}
+  st.panel_open="mastery"
+  check("mastery_view.draw 不崩", pcall(function() mv.draw() end))
+  -- 点第一行投点按钮(几何取自 row_rect)
+  local rx,ry,rw,rh = mv.row_rect(1)
+  check("mastery_view.hit 投点不崩", pcall(function() mv.hit(rx+rw-30, ry+25) end))
+  check("投点后该精通 Lv>0", require("sys.progression").mastery_level(D.MASTERIES[1].id)>0)
+  -- 装备页精通入口 hit 跳转
+  local ev = require("view.equip_view")
+  st.panel_open="equip"
+  check("equip_view 精通入口跳转 mastery", pcall(function()
+    local px=16*require("base.screen").sw
+    ev.hit(px+14*require("base.screen").sw+5, 56*require("base.screen").sh+6+5)
+  end) and st.panel_open=="mastery")
+end
+
 -- ===== helium require 烟测（验证 mock love 桩对未来 UI 阶段够用）=====
 -- 后续阶段 main.lua 将 require("helium")。helium core/input.lua 在 require 期会
 -- 读 love.handlers 做 orig 快照并写回包裹函数；atlas/element 捕获 love.graphics.*。

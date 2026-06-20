@@ -91,6 +91,9 @@ function equip_view.draw()
     setc(UI.gold); love.graphics.setFont(draw.font_med); love.graphics.print(math.floor(state.player.dps), rx+sx(58), yy-sy(4))
 
     button(px+pw/2-sx(60),py+ph-sy(32),sx(120),sy(26),"返回",{0.4,0.4,0.5},true)
+    -- 战斗精通入口(满级软成长)：显示可分配点，点开精通面板
+    local pts = (state.player.mastery and state.player.mastery.points) or 0
+    button(px+sx(14), py+sy(6), sx(96), sy(24), "精通"..(pts>0 and (" ("..pts..")") or ""), pts>0 and {0.55,0.45,0.7} or {0.35,0.36,0.44}, true, draw.font_sm)
 end
 
 function equip_view.hit(x,y)
@@ -98,6 +101,7 @@ function equip_view.hit(x,y)
     local w,h=love.graphics.getWidth(),love.graphics.getHeight()
     local px,py,pw,ph=sx(16),sy(56),w-sx(32),h-sy(112)
     if draw.hit_close_x(x,y,px,py,pw) then state.panel_open=nil; return true end
+    if hit(x,y,px+sx(14),py+sy(6),sx(96),sy(24)) then state.panel_open="mastery"; return true end
     if hit(x,y,px+pw/2-sx(60),py+ph-sy(34),sx(120),sy(28)) then state.panel_open=nil; return true end
     for _,slot in ipairs(SLOTS) do
         local ex,ey,ec = equip_cell_rect(slot); local g=state.player.equip[slot]

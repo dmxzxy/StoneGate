@@ -47,6 +47,7 @@ local craft_view = require("view.craft_view")
 local rest_view = require("view.rest_view")
 local bag_view = require("view.bag_view")
 local equip_view = require("view.equip_view")
+local mastery_view = require("view.mastery_view")
 local region_view = require("view.region_view")
 local dungeon_view = require("view.dungeon_view")
 local activity_view = require("view.activity_view")
@@ -123,6 +124,8 @@ local function init()
         -- 锻造职业：独立子职业（炼锭/造装），做工攒经验解锁更高配方
         forge={ lvl=1, xp=0 }, forge_bp="fg_copper",
         gather_node=nil,             -- 遭遇式采集当前节点（含 phase）
+        -- 战斗精通(满级软成长)：points=可分配点，<id>=各精通已投级数
+        mastery={ points=0 },
         -- 角色技能态：已学技能 / 冷却 / 限时增益 / 释放闪光
         skills={ "shoot" }, cd={}, buffs={}, cast_flash={} }
     for _,b in ipairs(BLUEPRINTS) do if b.learn=="start" then state.player.bp_known[b.id]=true end end
@@ -147,7 +150,7 @@ end
 -- 收进单个 save 表（避免主 chunk 触及 Lua 200 局部变量上限；文件拆分后会移到 base/save.lua）
 local save = {}
 save.FILE = "quiver/save.lua"
-save.VERSION = 6
+save.VERSION = 7
 local save_timer = 0
 
 -- 序列化一个纯数据值（数字/字符串/布尔/表）到 out 数组
@@ -189,6 +192,7 @@ function save.snapshot()
         skill=state.player.skill, craft=state.player.craft, craft_bp=state.player.craft_bp,
         forge=state.player.forge, forge_bp=state.player.forge_bp,
         energy=state.player.energy, energy_max=state.player.energy_max, last_time=state.player.last_time,
+        mastery=state.player.mastery,
         bp_known=state.player.bp_known, skills=state.player.skills,
         activity=state.activity, region_id=state.region.id, stage=state.stage,
     }
@@ -261,6 +265,11 @@ function save.migrate(data)
     if v < 6 then
         data.version = 6
     end
+    -- v6→v7：经验曲线收口 + 满级精通(C6)。旧档无 mastery → load 期由 init() 默认补全
+    --   ({points=0})；xp 曲线变陡(xp_need)，xp_next 在 load 期按新公式重算，旧 xp 值原样保留(只是更慢)。
+    if v < 7 then
+        data.version = 7
+    end
     return data
 end
 
@@ -290,6 +299,16 @@ function save.load()
         state.player.energy_max = data.energy_max or D.ENERGY_MAX
         state.player.energy = data.energy or state.player.energy_max
         state.player.last_time = data.last_time or ((love.timer and love.timer.getTime and love.timer.getTime()) or os.time())
+        -- 战斗精通：复原 points + 各精通级数(按 D.MASTERY 校验 id，未知键丢弃；非数值兜底 0)
+        state.player.mastery = { points=0 }
+        if type(data.mastery)=="table" then
+            local pts = tonumber(data.mastery.points) or 0
+            state.player.mastery.points = math.max(0, math.floor(pts))
+            for id in pairs(D.MASTERY) do
+                local lv = tonumber(data.mastery[id])
+                if lv and lv>0 then state.player.mastery[id] = math.floor(lv) end
+            end
+        end
         -- 已知图谱/已学技能：按当前表过滤掉已删除的 id（防改表后崩）
         state.player.bp_known = {}; for id in pairs(data.bp_known or {}) do if BP[id] then state.player.bp_known[id]=true end end
         -- start 类图谱(燧石箭/铜锭/铜甲/铜短弓...)始终保底已知(旧档无锻造起始配方也补上)
@@ -382,7 +401,8 @@ function love.draw()
     elseif state.panel_open=="activity" then activity_view.draw()
     elseif state.panel_open=="skills" then skills_view.draw()
     elseif state.panel_open=="bag" then bag_view.draw(); tooltip.draw_tooltip()
-    elseif state.panel_open=="equip" then equip_view.draw(); tooltip.draw_tooltip() end
+    elseif state.panel_open=="equip" then equip_view.draw(); tooltip.draw_tooltip()
+    elseif state.panel_open=="mastery" then mastery_view.draw() end
     -- 拖拽中的物品跟随指针（超过阈值才显示）
     bag_view.draw_drag()
     if state.result_banner=="defeat" then
