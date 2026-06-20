@@ -25,6 +25,7 @@ state.tooltip = nil          -- 物品详情：{kind=, ...}
 state.drag = nil             -- 拖拽中：{from="bag"/"equip"/"ammo", slot=, item=, x=, y=, moved=}
 state.region_drag = nil      -- 地区列表拖拽滚动/点选：{y0=, s0=, moved=}
 state.region_scroll = 0      -- 地区列表滚动偏移
+state.drawer_t = 0           -- 活动抽屉滑入进度 0..1（左侧 drawer 动画）
 
 -- 极薄访问器（覆盖菜单开关；不做事件，只是命名清晰的赋值）
 function state.open_panel(id) state.panel_open = id end

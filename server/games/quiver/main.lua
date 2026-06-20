@@ -75,6 +75,13 @@ end
 
 local function update(dt)
     fx.update_fx(dt)   -- 特效推进：粒子物理 / 跳字漂移 / toast 计时 / 震屏衰减 / 动画时钟（喂回 draw.t）
+    -- 活动抽屉滑入/滑出动画（左侧 drawer）：开则 t→1，关则 t→0
+    do
+        local target = (state.panel_open=="activity") and 1 or 0
+        local d = state.drawer_t or 0; local step = dt/0.18
+        if d < target then d = math.min(target, d+step) elseif d > target then d = math.max(target, d-step) end
+        state.drawer_t = d
+    end
     -- 技能冷却 / 限时增益 / 释放闪光（全局回充，切回战斗即就绪）
     for id,v in pairs(state.player.cd) do local nv=v-dt; state.player.cd[id]=(nv>0) and nv or nil end
     for id,v in pairs(state.player.cast_flash) do local nv=v-dt; state.player.cast_flash[id]=(nv>0) and nv or nil end

@@ -36,17 +36,26 @@ function activity_view.act_layout()
 end
 local act_layout = activity_view.act_layout
 
+-- 左侧抽屉几何（draw 与 hit 共用）：贴左边、约 2/3 宽、整高，按 state.drawer_t 从屏左滑入。
+-- base = 活动行起点 y（标题/副标题之下）。
 function activity_view.act_base()
     local w,h=love.graphics.getWidth(),love.graphics.getHeight()
-    local px,py,pw,ph=sx(16),sy(56),w-sx(32),h-sy(112)
-    return px,py,pw,ph, py+sy(44)
+    local dw = sx(330)
+    local t = state.drawer_t or 0
+    local px = -dw*(1-t)            -- t=0 在屏外，t=1 紧贴左边
+    return px, 0, dw, h, sy(48)
 end
 local act_base = activity_view.act_base
 
 function activity_view.draw()
     local sw = screen.sw
-    local w,h=love.graphics.getWidth(),love.graphics.getHeight(); love.graphics.setColor(0,0,0,0.72); love.graphics.rectangle("fill",0,0,w,h)
-    local px,py,pw,ph,base = act_base(); panel(px,py,pw,ph,{0.09,0.1,0.15,0.98},UI.line,10*sw)
+    local w,h=love.graphics.getWidth(),love.graphics.getHeight()
+    local px,py,pw,ph,base = act_base()
+    local t = state.drawer_t or 1
+    love.graphics.setColor(0,0,0,0.72*t); love.graphics.rectangle("fill",0,0,w,h)   -- scrim 随滑入淡入
+    panel(px,py,pw,ph,{0.09,0.1,0.15,0.99},UI.line,0)   -- 左侧抽屉：贴边直角
+    -- 右缘高光，强调"可向右点空白处收起"的抽屉边
+    setc(UI.line); love.graphics.rectangle("fill", px+pw-sx(2), py, sx(2), ph)
     love.graphics.setFont(draw.font_med); setc(UI.text); love.graphics.printf("活动",px,py+sy(8),pw,"center")
     draw.close_x(px,py,pw)
     love.graphics.setFont(draw.font_sm); setc(UI.dim); love.graphics.printf("挂机优先 · 战斗其次 · 副职业再次",px,py+sy(30),pw,"center")
@@ -71,17 +80,14 @@ function activity_view.draw()
             if a.kind=="gather" then
                 local s=state.player.skill[id]
                 love.graphics.print(string.format("Lv %d   寻找采集 %s", s.lvl, MAT_NAME[a.mat]), px+sx(44), yy+sy(28))
-                bar(px+sx(44), yy+sy(44), sx(158), sy(6), s.xp/gather_need(s.lvl), MAT_COLOR[a.mat])
+                bar(px+sx(44), yy+sy(44), sx(150), sy(6), s.xp/gather_need(s.lvl), MAT_COLOR[a.mat])
                 local c=skill_cost(s.lvl); local ok=state.player.gold>=c
-                button(px+pw-sx(96), yy+sy(13), sx(86), sy(30), "加速 "..c, ok and {0.3,0.6,0.5} or UI.btn, ok, draw.font_sm)
-                -- 进行中：职业经验环（推荐度可见性）
-                if cur then draw.ring(px+pw-sx(118), yy+e.h/2, sy(11), s.xp/gather_need(s.lvl), MAT_COLOR[a.mat]) end
+                button(px+pw-sx(90), yy+sy(13), sx(80), sy(30), "加速 "..c, ok and {0.3,0.6,0.5} or UI.btn, ok, draw.font_sm)
             elseif a.kind=="craft" then
                 love.graphics.print(string.format("Lv %d   做工攒经验解锁图谱", state.player.craft.lvl), px+sx(44), yy+sy(28))
-                bar(px+sx(44), yy+sy(44), sx(158), sy(6), state.player.craft.xp/craft_need(state.player.craft.lvl), {0.7,0.6,0.4})
+                bar(px+sx(44), yy+sy(44), sx(150), sy(6), state.player.craft.xp/craft_need(state.player.craft.lvl), {0.7,0.6,0.4})
                 local c=skill_cost(state.player.craft.lvl); local ok=state.player.gold>=c
-                button(px+pw-sx(96), yy+sy(13), sx(86), sy(30), "加速 "..c, ok and {0.3,0.6,0.5} or UI.btn, ok, draw.font_sm)
-                if cur then draw.ring(px+pw-sx(118), yy+e.h/2, sy(11), state.player.craft.xp/craft_need(state.player.craft.lvl), {0.7,0.6,0.4}) end
+                button(px+pw-sx(90), yy+sy(13), sx(80), sy(30), "加速 "..c, ok and {0.3,0.6,0.5} or UI.btn, ok, draw.font_sm)
             elseif a.kind=="combat" then
                 love.graphics.print(state.region.name.."   技能轮转 · 消耗箭矢", px+sx(44), yy+sy(30))
             else
@@ -90,17 +96,16 @@ function activity_view.draw()
             if cur then setc(UI.good); love.graphics.setFont(draw.font_sm); love.graphics.printf("进行中",px+sx(10),yy+sy(7),pw-sx(40),"right") end
         end
     end
-    button(px+pw/2-sx(60),py+ph-sy(36),sx(120),sy(28),"返回",{0.4,0.4,0.5},true)
 end
 
 function activity_view.hit(x,y)
     local px,py,pw,ph,base = act_base()
     if draw.hit_close_x(x,y,px,py,pw) then state.panel_open=nil; return true end
-    if hit(x,y,px+pw/2-sx(60),py+ph-sy(36),sx(120),sy(28)) then state.panel_open=nil; return true end
+    if x > px+pw then state.panel_open=nil; return true end   -- 点抽屉外侧（scrim）= 收起
     for _,e in ipairs(act_layout()) do
         if e.kind=="act" then
             local id=e.id; local a=ACTIVITIES[id]; local yy=base+e.y
-            if (a.kind=="gather" or a.kind=="craft") and hit(x,y,px+pw-sx(96),yy+sy(13),sx(86),sy(30)) then
+            if (a.kind=="gather" or a.kind=="craft") and hit(x,y,px+pw-sx(90),yy+sy(13),sx(80),sy(30)) then
                 upgrade_skill(a.kind=="craft" and "craft" or id); return true
             end
             if hit(x,y,px+sx(10),yy,pw-sx(20),e.h) then

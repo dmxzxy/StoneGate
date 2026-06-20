@@ -80,11 +80,13 @@ try("love.load", function() love.load() end)
 -- and run many update/draw frames so all branches tick.
 local function frames(n) for _=1,n do try("update", function() love.update(0.05) end); try("draw", function() love.draw() end) end end
 local function tap(x,y) try("press@"..x..","..y, function() if love.mousepressed then love.mousepressed(x,y,1) end; if love.mousereleased then love.mousereleased(x,y,1) end end) end
--- activity menu row centers under grouped layout (480x800); skills entry is 2nd bottom button
+-- activity is now a LEFT drawer (slides in from left); rows start at y=base(sy48)+layout.
+-- centers under grouped layout (480x800): idle/combat/sub headers + rows. x=120 is inside drawer.
 local ACT_OPEN = {55, 772}
 local SKILLS_OPEN = {147, 772}
-local ROW = { rest=150, combat=236, woodcut=322, mining=386, herb=450, fletch=514 }
-local function pick(act) tap(ACT_OPEN[1],ACT_OPEN[2]); frames(2); tap(120, ROW[act]); frames(2) end
+local ROW = { rest=98, combat=184, woodcut=270, mining=334, herb=398, fletch=462 }
+-- open the drawer, wait for slide-in (~0.18s), then tap a row, then let it settle
+local function pick(act) tap(ACT_OPEN[1],ACT_OPEN[2]); frames(6); tap(120, ROW[act]); frames(4) end
 
 frames(10)
 -- accumulate materials via each gather, then craft (exercises do_craft / add_craft_xp / unlock_blueprints),
