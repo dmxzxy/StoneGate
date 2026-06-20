@@ -29,6 +29,17 @@ local draw_item_icon = items.draw_item_icon
 
 local craft_view = {}
 
+-- 图谱产物图标：箭矢按三轴(head/element/feather)派生，其它按 id。
+local function out_icon_item(o)
+    if o.kind=="arrow" then return { kind="arrow", head=o.head, element=o.element, feather=o.feather } end
+    return { kind=o.kind, id=o.id }
+end
+-- 图谱展示色：箭矢用三轴派生色，其它用 out.color。
+local function bp_color(b)
+    if b.out.kind=="arrow" then return D.arrow_color(b.out) end
+    return b.out.color or {0.6,0.7,0.85}
+end
+
 -- 制造图谱卡片几何（draw 与 hit 共用）：下半屏竖排，只列已知图谱
 function craft_view.craft_known_list()
     local list={}; for _,b in ipairs(BLUEPRINTS) do if state.player.bp_known[b.id] then list[#list+1]=b end end; return list
@@ -51,14 +62,14 @@ function craft_view.draw()
     if bp and state.player.bp_known[bp.id] and can_craft(bp) then
         -- 正在制造：产出图标(产物色) + 库存 + 进度
         local o=bp.out
-        draw_item_icon({kind=o.kind,id=o.id}, cx-sx(40), py-sy(92), sx(16))
-        local have = (o.kind=="arrow") and ammo_count(o.id) or inv_count(o.kind,o.id)
-        love.graphics.setFont(draw.font_big); setc(o.color); love.graphics.print(have, cx-sx(10), py-sy(106))
+        draw_item_icon(out_icon_item(o), cx-sx(40), py-sy(92), sx(16))
+        local have = (o.kind=="arrow") and ammo_count(o.head) or inv_count(o.kind,o.id)
+        love.graphics.setFont(draw.font_big); setc(o.color or {0.8,0.8,0.85}); love.graphics.print(have, cx-sx(10), py-sy(106))
         love.graphics.setFont(draw.font_sm); setc(UI.dim); love.graphics.printf("正在制造 "..bp.name, 0, py-sy(116), love.graphics.getWidth(), "center")
-        bar(cx-sx(100), py-sy(70), sx(200), sy(12), state.player.craft_prog or 0, o.color)
+        bar(cx-sx(100), py-sy(70), sx(200), sy(12), state.player.craft_prog or 0, o.color or {0.6,0.7,0.85})
     elseif bp then
         -- 缺料：灰产物 + 所需材料(够亮/缺红)
-        draw_item_icon({kind=bp.out.kind,id=bp.out.id}, cx, py-sy(92), sx(16))
+        draw_item_icon(out_icon_item(bp.out), cx, py-sy(92), sx(16))
         love.graphics.setFont(draw.font_sm); setc(UI.bad); love.graphics.printf("材料不足："..bp.name, 0, py-sy(116), love.graphics.getWidth(), "center")
         local i=0; for m,n in pairs(bp.cost) do local mx=cx-sx(40)+i*sx(46); i=i+1
             local ok=inv_count("mat",m)>=n
@@ -70,9 +81,9 @@ function craft_view.draw()
     -- 下半屏：所有已知图谱，点选即切换并持续制造（材料用尽自动停）
     love.graphics.setFont(draw.font_sm); setc(UI.dim); love.graphics.printf("图谱（点选制造）", sx(20), DESIGN_H*0.55*sh-sy(18), love.graphics.getWidth()-sx(40), "left")
     for slot,b in ipairs(craft_known_list()) do
-        local x,y,cw,ch = craft_card_rect(slot); local sel=(state.player.craft_bp==b.id); local oc=b.out.color
+        local x,y,cw,ch = craft_card_rect(slot); local sel=(state.player.craft_bp==b.id); local oc=bp_color(b)
         panel(x,y,cw,ch, sel and {oc[1]*0.22,oc[2]*0.22,oc[3]*0.24,0.97} or {0.11,0.12,0.17,0.95}, sel and oc or UI.line, 6*sw)
-        draw_item_icon({kind=b.out.kind,id=b.out.id}, x+sx(18), y+ch/2, sx(11))
+        draw_item_icon(out_icon_item(b.out), x+sx(18), y+ch/2, sx(11))
         setc(UI.text); love.graphics.setFont(draw.font_sm); love.graphics.print(b.name.."  x"..b.out.qty, x+sx(36), y+sy(4))
         local cxx=x+sx(36); local can=true
         for m,n in pairs(b.cost) do

@@ -142,6 +142,56 @@ check("读档后 max_mp 由 recalc 重算", q.max_mp==30+q.level*5 and q.mp~=nil
 FS["quiver/save.lua"] = "this is not lua {{{"
 check("坏档 save.load 返回 false 不崩", S.save.load()==false)
 
+-- ===== C3 箭矢三轴 + 怪物家族抗性 白盒 =====
+do
+  local D = require("data")
+  local inv = require("sys.inventory")
+  local combat = require("sys.combat")
+  local st = require("core.state")
+  S.init()  -- 干净开局
+  -- 派生：三轴成品箭 key/name/color/mult 不崩且自洽
+  local a = { head="steel", element="bleed", feather="wind" }
+  check("arrow_key 三轴拼接", D.arrow_key(a)=="steel|bleed|wind")
+  check("arrow_mult 取箭头档", D.arrow_mult(a)==D.AHEAD.steel.phys_mult)
+  check("arrow_name 含元素+箭头", type(D.arrow_name(a))=="string" and #D.arrow_name(a)>0)
+  -- 缺轴/坏数据兜底(旧档安全)
+  check("缺轴箭兜底不崩", D.arrow_mult({})==D.ARROW_HEADS[1].phys_mult)
+  -- 弹药三轴存取：加两种不同元素箭，best 取最高物理档
+  st.player.ammo_cap = 4; st.player.ammo = {}
+  inv.ammo_add_arrow("flint","phys","plain",10)
+  inv.ammo_add_arrow("steel","fire","wind",10)
+  check("ammo_best 取最高物理档(steel)", inv.ammo_best() and inv.ammo_best().head=="steel")
+  check("ammo_count 按箭头汇总", inv.ammo_count("flint")==10 and inv.ammo_count("steel")==10)
+  check("ammo_key_count 按确切组合", inv.ammo_key_count({head="steel",element="fire",feather="wind"})==10)
+  -- 家族抗性：不死怕火(系数>1)、构造抵毒(系数<1)
+  check("undead 火抗>1(弱点)", D.ENEMY_FAMILY.undead.resist.fire>1)
+  check("construct 高甲 armor_mul=1.3", D.ENEMY_FAMILY.construct.armor_mul==1.3)
+  -- 各敌型都有 family，且 family 在 ENEMY_FAMILY 表里
+  for id,arch in pairs(D.ENEMY_ARCH) do
+    check("敌型 "..id.." 有合法 family", arch.family~=nil and D.ENEMY_FAMILY[arch.family]~=nil)
+  end
+  -- 命中元素：造一个不死敌人，火箭命中后挂 dot；构造敌护甲含 armor_mul
+  st.region = D.REGIONS[1]; st.stage=0
+  local en = combat.make_enemy("wraith","normal")  -- undead
+  check("make_enemy 带 family/base_armor/debuffs", en.family=="undead" and en.base_armor~=nil and type(en.debuffs)=="table")
+  st.enemy = en; en.phase="fight"
+  st.projectiles = {}
+  -- 装满火箭并发射，命中应挂火 dot
+  st.player.ammo = {}; inv.ammo_add_arrow("steel","fire","wind",10); require("sys.progression").recalc()
+  combat.do_shot(1.0, {})
+  local p = st.projectiles[#st.projectiles]
+  check("火箭抛射物带 dot(火元素)", p and p.dot~=nil and p.dot.eid=="fire")
+  combat.resolve_hit(p)
+  check("命中后敌身上有火 dot", #en.dots>0)
+  -- 冰箭命中挂减速 debuff，敌 spd 降低
+  local en2 = combat.make_enemy("boar","normal"); st.enemy=en2; en2.phase="fight"; st.projectiles={}
+  local spd0 = en2.spd
+  st.player.ammo={}; inv.ammo_add_arrow("iron","frost","plain",5); require("sys.progression").recalc()
+  combat.do_shot(1.0,{})
+  combat.resolve_hit(st.projectiles[#st.projectiles])
+  check("冰箭命中后敌减速(spd 下降)", en2.spd < spd0)
+end
+
 -- ===== helium require 烟测（验证 mock love 桩对未来 UI 阶段够用）=====
 -- 后续阶段 main.lua 将 require("helium")。helium core/input.lua 在 require 期会
 -- 读 love.handlers 做 orig 快照并写回包裹函数；atlas/element 捕获 love.graphics.*。

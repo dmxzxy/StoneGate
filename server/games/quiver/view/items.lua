@@ -18,14 +18,14 @@ local items = {}
 
 function items.item_color(it)
     if it.kind=="gear" then return inv.gear_color(it.gear)
-    elseif it.kind=="arrow" then return ARROW[it.id] and ARROW[it.id].color or UI.dim
+    elseif it.kind=="arrow" then return D.arrow_color(it)
     elseif it.kind=="potion" then return POT_COLOR[it.id] or UI.dim
     else return MAT_COLOR[it.id] or UI.dim end
 end
 
 function items.draw_item_icon(it, cx, cy, s)
     if it.kind=="mat" then icon_mat(it.id, cx, cy, s)
-    elseif it.kind=="arrow" then icon_arrow(cx, cy, s, ARROW[it.id] and ARROW[it.id].color)
+    elseif it.kind=="arrow" then icon_arrow(cx, cy, s, D.arrow_color(it))
     elseif it.kind=="potion" then icon_potion(cx, cy, s, POT_COLOR[it.id])
     else icon_kind(SLOT_INFO[it.gear.slot].kind, cx, cy, s, inv.gear_color(it.gear)) end
 end

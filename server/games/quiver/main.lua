@@ -108,7 +108,7 @@ local function init()
         -- 采集职业：独立等级 + 经验（靠采集攒经验升级，与角色等级分离）
         skill={ woodcut={lvl=1,xp=0}, mining={lvl=1,xp=0}, herb={lvl=1,xp=0} },
         -- 制造职业：独立，做工攒经验升级（不进 skill 表）
-        craft={ lvl=1, xp=0 }, craft_bp="wood", craft_prog=0, craft_target=nil, bp_known={},
+        craft={ lvl=1, xp=0 }, craft_bp="ar_flint", craft_prog=0, craft_target=nil, bp_known={},
         gather_node=nil,             -- 遭遇式采集当前节点（含 phase）
         -- 角色技能态：已学技能 / 冷却 / 限时增益 / 释放闪光
         skills={ "shoot" }, cd={}, buffs={}, cast_flash={} }
@@ -120,7 +120,7 @@ local function init()
     -- 初始物品：T1 系材料入背包(够接通制箭/造锭/药剂) + 羽毛，箭矢入箭袋
     inv_add("mat","w_shaft1",8); inv_add("mat","o_head1",4); inv_add("mat","h_heal1",2)
     inv_add("mat","feather",6); inv_add("mat","o_blade2",2)
-    ammo_add("wood",30)
+    ammo_add("flint",30)   -- 燧石箭(纯物理)开局弹药
     state.player.hp=state.player.max_hp
     state.region=REGIONS[1]; state.stage=0; fx.floats={}; fx.particles={}; state.projectiles={}; state.result_banner=nil; fx.toast=nil
     state.activity="rest"; state.panel_open=nil; state.enemy=nil
@@ -133,7 +133,7 @@ end
 -- 收进单个 save 表（避免主 chunk 触及 Lua 200 局部变量上限；文件拆分后会移到 base/save.lua）
 local save = {}
 save.FILE = "quiver/save.lua"
-save.VERSION = 3
+save.VERSION = 4
 local save_timer = 0
 
 -- 序列化一个纯数据值（数字/字符串/布尔/表）到 out 数组
@@ -217,6 +217,24 @@ function save.migrate(data)
         end end
         data.version = 3
     end
+    -- v3→v4：箭矢三轴(C3)。旧弹药是单档箭 {id="wood"/"iron"/"hunter"/"rune", qty}，
+    --   迁移为成品箭三轴 {head,element,feather=phys/plain}；未知箭 id 丢弃(留空格)不崩。
+    --   旧 craft_bp(wood/iron/hunter/rune) / bp_known 旧箭图谱 id 在 load 期由 BP 过滤掉，安全。
+    if v < 4 then
+        local headmap = { wood="flint", iron="bronze", hunter="steel", rune="mithril" }
+        if type(data.ammo)=="table" then
+            for i,it in pairs(data.ammo) do
+                if type(it)=="table" then
+                    if it.head==nil then
+                        local h = headmap[it.id]
+                        if h then data.ammo[i] = { kind="arrow", head=h, element="phys", feather="plain", qty=it.qty or 0 }
+                        else data.ammo[i] = nil end   -- 未知旧箭：丢弃
+                    elseif it.kind==nil then it.kind="arrow" end
+                end
+            end
+        end
+        data.version = 4
+    end
     return data
 end
 
@@ -238,10 +256,10 @@ function save.load()
         state.player.equip = data.equip or {}
         state.player.skill = data.skill or state.player.skill
         state.player.craft = data.craft or state.player.craft
-        state.player.craft_bp = (data.craft_bp and BP[data.craft_bp]) and data.craft_bp or "wood"
+        state.player.craft_bp = (data.craft_bp and BP[data.craft_bp]) and data.craft_bp or "ar_flint"
         -- 已知图谱/已学技能：按当前表过滤掉已删除的 id（防改表后崩）
         state.player.bp_known = {}; for id in pairs(data.bp_known or {}) do if BP[id] then state.player.bp_known[id]=true end end
-        state.player.bp_known.wood = true
+        state.player.bp_known.ar_flint = true
         state.player.skills = {}; for _,id in ipairs(data.skills or {}) do if SKILLS[id] then state.player.skills[#state.player.skills+1]=id end end
         if #state.player.skills==0 then state.player.skills={"shoot"} end
         -- inv/ammo：定长补 nil（稀疏表回填，绝不丢洞后物品）。

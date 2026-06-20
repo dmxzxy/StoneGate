@@ -24,7 +24,7 @@ function craft.do_craft(bp)
     if not craft.can_craft(bp) then return end
     for m,n in pairs(bp.cost) do inv.inv_remove("mat",m,n) end
     local o = bp.out
-    if o.kind=="arrow" then inv.ammo_add(o.id, o.qty)
+    if o.kind=="arrow" then inv.ammo_add_arrow(o.head, o.element, o.feather, o.qty)
     else inv.inv_add(o.kind, o.id, o.qty) end   -- mat/potion 进背包
     prog.add_craft_xp(math.ceil(bp.time*2))
     prog.recalc()
@@ -32,7 +32,7 @@ end
 
 -- craft 挂机 tick：按当前选中图谱持续制造，材料用尽自动停摆并提示一次
 function craft.tick(dt)
-    local bp = BP[state.player.craft_bp or "wood"]
+    local bp = BP[state.player.craft_bp or "ar_flint"]
     state.player.craft_target = bp
     if bp and state.player.bp_known[bp.id] and craft.can_craft(bp) then
         state.player.craft_prog = (state.player.craft_prog or 0) + CRAFT_BASE * state.player.craft.lvl / bp.time * dt

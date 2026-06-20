@@ -68,25 +68,48 @@ function inv.inv_swap(a,b)
     state.player.inv[a], state.player.inv[b] = ib, ia
 end
 
--- ---- 箭袋弹药槽（箭矢只能放这里，不进主背包） ----
-function inv.ammo_count(id)
-    local n=0; for i=1,(state.player.ammo_cap or 0) do local it=state.player.ammo[i]; if it and it.id==id then n=n+it.qty end end; return n
+-- ---- 箭袋弹药槽（成品箭三轴：{head,element,feather,qty}；只能放这里，不进主背包） ----
+-- 弹药项相等 = 三轴全同(key)。ammo_count(headid) 仍按“箭头档”汇总(供 recalc/战斗取最高 phys 档)。
+function inv.ammo_count(headid)
+    local n=0; for i=1,(state.player.ammo_cap or 0) do local it=state.player.ammo[i]; if it and (it.head or "flint")==headid then n=n+it.qty end end; return n
 end
-function inv.ammo_add(id,qty)
+-- 某确切三轴组合(head|element|feather)的总数(tooltip 用)
+function inv.ammo_key_count(a)
+    local key = D.arrow_key(a); local n=0
+    for i=1,(state.player.ammo_cap or 0) do local it=state.player.ammo[i]; if it and D.arrow_key(it)==key then n=n+it.qty end end
+    return n
+end
+-- 取弹药里物理倍率最高且有货的那一支(战斗发射用)；无则 nil
+function inv.ammo_best()
+    local best, bm = nil, -1
+    for i=1,(state.player.ammo_cap or 0) do local it=state.player.ammo[i]
+        if it and it.qty>0 then local m=D.arrow_mult(it); if m>bm then bm=m; best=it end end
+    end
+    return best
+end
+function inv.ammo_remove_item(it, n)
+    if not it then return end
+    it.qty = it.qty - n
+    if it.qty<=0 then for i=1,(state.player.ammo_cap or 0) do if state.player.ammo[i]==it then state.player.ammo[i]=nil end end end
+end
+-- 加入成品箭(三轴)。同 key 叠堆，再开新格；箭袋满则丢弃溢出部分。
+function inv.ammo_add_arrow(head, element, feather, qty)
     local cap=state.player.ammo_cap or 0; local ms=200
-    for i=1,cap do local it=state.player.ammo[i]; if it and it.id==id and it.qty<ms then local put=math.min(ms-it.qty,qty); it.qty=it.qty+put; qty=qty-put; if qty<=0 then return true end end end
-    for i=1,cap do if not state.player.ammo[i] then local put=math.min(ms,qty); state.player.ammo[i]={id=id,qty=put}; qty=qty-put; if qty<=0 then return true end end end
-    return qty<=0   -- 装不下的部分丢弃（箭袋满）
+    local key = D.arrow_key({head=head, element=element, feather=feather})
+    for i=1,cap do local it=state.player.ammo[i]
+        if it and D.arrow_key(it)==key and it.qty<ms then local put=math.min(ms-it.qty,qty); it.qty=it.qty+put; qty=qty-put; if qty<=0 then return true end end
+    end
+    for i=1,cap do if not state.player.ammo[i] then
+        local put=math.min(ms,qty); state.player.ammo[i]={kind="arrow", head=head, element=element, feather=feather, qty=put}; qty=qty-put; if qty<=0 then return true end end
+    end
+    return qty<=0
 end
-function inv.ammo_remove(id,n)
-    for i=1,(state.player.ammo_cap or 0) do local it=state.player.ammo[i]; if it and it.id==id then
-        local take=math.min(n,it.qty); it.qty=it.qty-take; n=n-take; if it.qty<=0 then state.player.ammo[i]=nil end
-        if n<=0 then break end end end
-end
+-- 兼容旧签名 ammo_add(id, qty)：id 当作箭头档，元素/翎羽兜底纯物理普通羽
+function inv.ammo_add(id, qty) return inv.ammo_add_arrow(id, "phys", "plain", qty) end
 function inv.ammo_swap(a,b)
     if a==b then return end
     local ia,ib=state.player.ammo[a],state.player.ammo[b]
-    if ia and ib and ia.id==ib.id then local mv=math.min(200-ib.qty,ia.qty); if mv>0 then ib.qty=ib.qty+mv; ia.qty=ia.qty-mv; if ia.qty<=0 then state.player.ammo[a]=nil end; return end end
+    if ia and ib and D.arrow_key(ia)==D.arrow_key(ib) then local mv=math.min(200-ib.qty,ia.qty); if mv>0 then ib.qty=ib.qty+mv; ia.qty=ia.qty-mv; if ia.qty<=0 then state.player.ammo[a]=nil end; return end end
     state.player.ammo[a],state.player.ammo[b]=ib,ia
 end
 

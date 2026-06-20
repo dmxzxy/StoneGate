@@ -113,7 +113,8 @@ function prog.craft_need(lv) return math.floor(40*(lv^1.4)) end
 function prog.unlock_blueprints()  -- 到达 req 等级自动解锁 level/master 类（master 第一期也按等级解锁，TODO：技能大师）
     for _,b in ipairs(BLUEPRINTS) do
         if not state.player.bp_known[b.id] and b.learn~="start" and state.player.craft.lvl >= b.req then
-            state.player.bp_known[b.id]=true; fx.set_toast("学会图谱："..b.name, b.out.color)
+            local oc = (b.out.kind=="arrow") and D.arrow_color(b.out) or (b.out.color or {0.7,0.6,0.4})
+            state.player.bp_known[b.id]=true; fx.set_toast("学会图谱："..b.name, oc)
         end
     end
 end

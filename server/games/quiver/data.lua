@@ -229,32 +229,131 @@ function D.mat_id(cat, tier, system)
     return d and d.id
 end
 
+-- ============================================================================
+-- 箭矢三轴（§2.3）：一支成品箭 = 箭头档(head) × 元素(element) × 翎羽(feather)。
+--   head    决定物理伤害倍率(phys_mult)，吃箭簇矿锭。10 档。
+--   element 决定 on-hit 玩法(点燃/减速/中毒/流血/穿甲/雷/爆/破甲/净化/纯物理)。10 种。
+--   feather 决定手感微调(暴击/攻速/穿透)。4 种。
+--   成品箭存在弹药槽：{head=, element=, feather=, qty=}；派生名/色由 D.arrow_* 计算。
+-- ============================================================================
+-- 箭头档：tier 1-10 → phys_mult。col 仅做箭杆/箭簇基调。mat=造此档箭头所需箭簇矿档(o_head<tier..>)。
+D.ARROW_HEADS = {
+    { id="flint",   name="燧石",   tier=1,  phys_mult=0.9,  mtier=1, color={0.55,0.5,0.45} },
+    { id="copper",  name="铜簇",   tier=2,  phys_mult=1.1,  mtier=2, color={0.78,0.5,0.32} },
+    { id="bronze",  name="青铜簇", tier=3,  phys_mult=1.3,  mtier=3, color={0.72,0.6,0.35} },
+    { id="iron",    name="铁簇",   tier=4,  phys_mult=1.55, mtier=4, color={0.72,0.74,0.8} },
+    { id="steel",   name="钢簇",   tier=5,  phys_mult=1.85, mtier=5, color={0.78,0.82,0.9} },
+    { id="silver",  name="银簇",   tier=6,  phys_mult=2.15, mtier=6, color={0.85,0.88,0.95} },
+    { id="mithril", name="秘银簇", tier=7,  phys_mult=2.5,  mtier=6, color={0.6,0.85,0.9} },
+    { id="adamant", name="精金簇", tier=8,  phys_mult=2.85, mtier=7, color={0.5,0.8,0.6} },
+    { id="starsteel",name="星钢簇",tier=9,  phys_mult=3.2,  mtier=7, color={0.7,0.7,0.95} },
+    { id="void",    name="虚空簇", tier=10, phys_mult=3.6,  mtier=8, color={0.55,0.4,0.7} },
+}
+D.AHEAD = {}; for _,h in ipairs(D.ARROW_HEADS) do D.AHEAD[h.id]=h end
+
+-- 元素/特效：proc 数据喂战斗 do_shot。kind 决定命中行为：
+--   dot     → 命中挂持续伤害(火点燃/毒叠层/流血)；mult=每秒该比例本发伤害，dur/tick，stack/no_armor 可选
+--   debuff  → 命中挂减益(冰减速 slow / 破甲 sunder)；amt/dur
+--   pierce  → 命中无视该比例护甲(穿甲)
+--   bonus   → 对特定 family 增伤(净化对不死/虚空)
+--   splash/chain → 群战预留(单体先记数值，不实际分裂)
+--   none    → 纯物理
+D.ARROW_ELEMENTS = {
+    { id="phys",   name="物理", kind="none",   color={0.8,0.8,0.85}, desc="纯物理，吃满暴击。" },
+    { id="fire",   name="火焰", kind="dot",    color={1.0,0.5,0.2},  dot_mult=0.30, dur=4, tick=1, stack=true,            desc="点燃 DOT，可叠新覆旧。对不死 +20%。", vs={undead=1.2} },
+    { id="frost",  name="冰霜", kind="debuff", color={0.5,0.8,1.0},  debuff="slow",  amt=0.20, dur=3,                     desc="减速：敌出手速 -20%。" },
+    { id="poison", name="剧毒", kind="dot",    color={0.5,0.85,0.45},dot_mult=0.06, dur=6, tick=1, stack=true, maxstack=10,desc="中毒叠层，每层 0.06×/s，上限10。" },
+    { id="bleed",  name="流血", kind="dot",    color={0.85,0.2,0.2}, dot_mult=0.10, dur=5, tick=1, stack=true, maxstack=8, no_armor=true, desc="物理流血叠层，无视护甲。" },
+    { id="pierce", name="穿甲", kind="pierce", color={0.7,0.7,0.78}, pierce=0.30, heavy=0.12,                            desc="无视 30% 护甲，单发更重略降速。" },
+    { id="thunder",name="雷击", kind="chain",  color={0.7,0.8,1.0},  chain_p=0.35, chain_mult=0.5,                       desc="命中有概率连跳(群战预留)。" },
+    { id="blast",  name="爆裂", kind="splash", color={1.0,0.7,0.3},  splash_mult=0.4,                                    desc="命中小范围溅射(群战预留)。" },
+    { id="sunder", name="破甲", kind="debuff", color={0.85,0.6,0.35},debuff="sunder", amt=0.08, dur=5, maxstack=6,        desc="命中降敌护甲 8%/层(可叠)。" },
+    { id="purify", name="净化", kind="bonus",  color={0.95,0.95,0.7},vs={undead=1.35, void=1.35},                        desc="对不死/虚空 +35% 伤，对其它无加成。" },
+}
+D.AELEM = {}; for _,e in ipairs(D.ARROW_ELEMENTS) do D.AELEM[e.id]=e end
+
+-- 翎羽：手感微调(小幅 build 杠杆)。crit/haste/pierce 加成；single=单发伤害微调。
+D.ARROW_FEATHERS = {
+    { id="plain", name="普通羽", color={0.85,0.85,0.9},                       desc="无修正。" },
+    { id="eagle", name="鹰羽",   color={0.7,0.55,0.3},  crit=0.05,            desc="+5% 暴击率，配弩/物理。" },
+    { id="wind",  name="风羽",   color={0.7,0.9,0.95},  haste=0.06,           desc="+6% 攻速，配短弓叠层。" },
+    { id="heavy", name="重羽",   color={0.5,0.45,0.4},  single=0.05, haste=-0.03, pierce=0.05, desc="单发 +5% 但 -3% 速，配长弓/穿甲。" },
+}
+D.AFEAT = {}; for _,f in ipairs(D.ARROW_FEATHERS) do D.AFEAT[f.id]=f end
+
+-- 翎羽 id → 制箭所需二级材料(羽毛变体)；普通羽用基础羽毛。
+D.FEATHER_MAT = { plain="feather", eagle="eaglefeat", wind="windfeat", heavy="heavyfeat" }
+
+-- 成品箭派生：稳定 key(用于弹药堆叠/相等判定) / 显示名 / 颜色 / 物理倍率。
+-- key 形如 "steel|bleed|wind"；缺轴兜底 flint/phys/plain（旧档/坏数据安全）。
+function D.arrow_key(a)
+    return (a.head or "flint").."|"..(a.element or "phys").."|"..(a.feather or "plain")
+end
+function D.arrow_head(a)  return D.AHEAD[a.head] or D.ARROW_HEADS[1] end
+function D.arrow_elem(a)  return D.AELEM[a.element] or D.AELEM.phys end
+function D.arrow_feat(a)  return D.AFEAT[a.feather] or D.AFEAT.plain end
+function D.arrow_mult(a)  return D.arrow_head(a).phys_mult end
+function D.arrow_name(a)
+    local h,e,f = D.arrow_head(a), D.arrow_elem(a), D.arrow_feat(a)
+    -- 名 = 元素 + 箭头(物理则只箭头)；翎羽非普通则后缀
+    local base = (e.id=="phys") and (h.name.."箭") or (e.name..h.name.."箭")
+    if f.id~="plain" then base = base.."·"..f.name end
+    return base
+end
+function D.arrow_color(a)
+    -- 元素色为主，物理则取箭头色
+    local e = D.arrow_elem(a)
+    if e.id=="phys" then return D.arrow_head(a).color end
+    return e.color
+end
+
+-- 签名箭(§2.3)：稀有配方解锁，自带组合特效 + 更高数值，作毕业目标。
+-- 数据上仍是成品箭(head+element+feather) + 可选 sig 增益；这里登记供配方/未来扩展。
+D.SIGNATURE_ARROWS = {
+    { id="dragonbreath", name="龙息箭", head="starsteel", element="fire",   feather="heavy", flavor="火+爆裂的毁灭之矢" },
+    { id="godslayer",    name="弑神箭", head="void",      element="pierce", feather="eagle", flavor="穿甲+净化+星钢的弑神之矢" },
+}
+
 -- 消耗品（药剂等，走背包可堆叠）
 D.POT_NAME = { hppot="疗伤药剂" }
 D.POT_COLOR = { hppot={0.9,0.35,0.4} }
 D.POT_DESC = { hppot="战斗中生命过低时自动饮用，回复部分生命。" }
 
 -- 统一制造图谱：制箭只是「造箭类图谱」，与中间材料/药剂共用同一套 can_craft/do_craft。
--- out.kind: arrow(进箭袋,带 mult/color 供战斗) | mat(进背包) | potion(进背包)
+-- out.kind: arrow(进箭袋,成品箭三轴 head/element/feather) | mat(进背包) | potion(进背包)
+-- 制箭 out = {kind="arrow", head=, element=, feather=, qty=}；战斗按三轴查 D.AHEAD/AELEM/AFEAT。
 -- req=所需制造职业等级；time=制作归一化耗时；learn=start(初始)|level(到级自动)|master(技能大师)
 D.ARROW_BATCH = 20
 D.CRAFT_BASE  = 0.20   -- 制作进度基准：速率 = CRAFT_BASE * craft.lvl / bp.time
+-- 制箭图谱按系取材：箭杆木(w_shaft)+箭簇矿(o_head) + 元素附材(精萃/油/毒囊/利刃石...) + 翎羽变体。
+-- 三轴自由组合数远大于单表 → 这里只铺“代表性常用箭”，玩家按 head/element/feather 区分。
 D.BLUEPRINTS = {
-    { id="wood",   name="木箭",   req=1, time=4, learn="start",  out={kind="arrow",  id="wood",   qty=D.ARROW_BATCH, mult=1.0,  color={0.62,0.46,0.26}}, cost={ w_shaft1=3, feather=1 } },
-    { id="iron",   name="铁箭",   req=2, time=5, learn="level",  out={kind="arrow",  id="iron",   qty=D.ARROW_BATCH, mult=1.35, color={0.72,0.74,0.8}},  cost={ w_shaft1=2, o_head1=3, feather=1 } },
-    { id="hunter", name="猎手箭", req=4, time=6, learn="level",  out={kind="arrow",  id="hunter", qty=D.ARROW_BATCH, mult=1.75, color={0.5,0.85,0.55}},  cost={ w_shaft2=2, o_head2=2, h_essence1=3, feather=2 } },
-    { id="rune",   name="符文箭", req=7, time=8, learn="master", out={kind="arrow",  id="rune",   qty=D.ARROW_BATCH, mult=2.3,  color={0.78,0.5,1.0}},   cost={ w_shaft3=3, o_head3=4, h_essence2=4, feather=2 } },
-    { id="ironbar",name="精铁锭", req=3, time=6, learn="level",  out={kind="mat",    id="ironbar",qty=1,             color={0.8,0.82,0.88}},  cost={ o_blade2=4, w_char1=2 } },
-    { id="hppot",  name="疗伤药剂",req=2,time=5, learn="level",  out={kind="potion", id="hppot",  qty=1,             color={0.9,0.35,0.4}},   cost={ h_heal1=4 } },
-    { id="leather",name="鞣制皮革",req=5,time=7, learn="master", out={kind="mat",    id="leather",qty=2,             color={0.7,0.5,0.32}},   cost={ hide=2, h_heal2=1 } },
+    -- ---- 物理箭(头档进阶，纯物理兜底) ----
+    { id="ar_flint",  name="燧石箭",  req=1, time=4, learn="start",  out={kind="arrow", head="flint",  element="phys", feather="plain", qty=D.ARROW_BATCH}, cost={ w_shaft1=3, feather=1 } },
+    { id="ar_iron",   name="铁簇箭",  req=2, time=5, learn="level",  out={kind="arrow", head="iron",   element="phys", feather="plain", qty=D.ARROW_BATCH}, cost={ w_shaft2=2, o_head4=3, feather=1 } },
+    { id="ar_steel",  name="钢簇箭",  req=5, time=6, learn="level",  out={kind="arrow", head="steel",  element="phys", feather="eagle", qty=D.ARROW_BATCH}, cost={ w_shaft3=2, o_head5=3, eaglefeat=1 } },
+    { id="ar_mithril",name="秘银箭",  req=8, time=7, learn="level",  out={kind="arrow", head="mithril",element="phys", feather="eagle", qty=D.ARROW_BATCH}, cost={ w_shaft4=2, o_head6=3, eaglefeat=2 } },
+    -- ---- 元素箭(代表性 build 箭) ----
+    { id="ar_fire",   name="火焰箭",  req=3, time=6, learn="level",  out={kind="arrow", head="bronze", element="fire",   feather="plain", qty=D.ARROW_BATCH}, cost={ w_shaft2=2, o_head3=2, oil=2, feather=1 } },
+    { id="ar_frost",  name="冰霜箭",  req=4, time=6, learn="level",  out={kind="arrow", head="iron",   element="frost",  feather="wind",  qty=D.ARROW_BATCH}, cost={ w_shaft2=2, o_head4=2, h_essence2=3, windfeat=1 } },
+    { id="ar_poison", name="剧毒箭",  req=4, time=6, learn="level",  out={kind="arrow", head="iron",   element="poison", feather="wind",  qty=D.ARROW_BATCH}, cost={ w_shaft2=2, o_head4=2, venomsac=2, windfeat=1 } },
+    { id="ar_bleed",  name="流血箭",  req=5, time=6, learn="level",  out={kind="arrow", head="steel",  element="bleed",  feather="wind",  qty=D.ARROW_BATCH}, cost={ w_shaft3=2, o_head5=2, bladestone=2, windfeat=1 } },
+    { id="ar_pierce", name="穿甲箭",  req=6, time=7, learn="master", out={kind="arrow", head="silver", element="pierce", feather="heavy", qty=D.ARROW_BATCH}, cost={ w_shaft4=3, o_head6=3, heavyfeat=2 } },
+    { id="ar_blast",  name="爆裂箭",  req=6, time=7, learn="master", out={kind="arrow", head="silver", element="blast",  feather="plain", qty=D.ARROW_BATCH}, cost={ w_shaft4=2, o_head6=2, oil=2, sulfur=2 } },
+    { id="ar_sunder", name="破甲箭",  req=7, time=7, learn="master", out={kind="arrow", head="mithril",element="sunder", feather="heavy", qty=D.ARROW_BATCH}, cost={ w_shaft5=2, o_head6=3, h_essence4=2, heavyfeat=2 } },
+    { id="ar_purify", name="净化箭",  req=8, time=8, learn="master", out={kind="arrow", head="adamant",element="purify", feather="plain", qty=D.ARROW_BATCH}, cost={ w_shaft6=2, o_head7=3, h_essence5=3, feather=2 } },
+    -- ---- 中间材料 / 药剂 ----
+    { id="ironbar",name="精铁锭", req=3, time=6, learn="level",  out={kind="mat",    id="ironbar",qty=1, color={0.8,0.82,0.88}},  cost={ o_blade2=4, w_char1=2 } },
+    { id="hppot",  name="疗伤药剂",req=2,time=5, learn="level",  out={kind="potion", id="hppot",  qty=1, color={0.9,0.35,0.4}},   cost={ h_heal1=4 } },
+    { id="leather",name="鞣制皮革",req=5,time=7, learn="master", out={kind="mat",    id="leather",qty=2, color={0.7,0.5,0.32}},   cost={ hide=2, h_heal2=1 } },
 }
 D.BP = {}; for _,b in ipairs(D.BLUEPRINTS) do D.BP[b.id]=b end
--- 箭矢档位（从图谱里 out.kind=="arrow" 派生，供战斗/显示按 id 查倍率与颜色；低→高有序）
+-- 箭头档有序表(低→高)：战斗/recalc 取弹药里最高 phys_mult 用；展示色按 head。
 D.ARROWS, D.ARROW = {}, {}
-for _,b in ipairs(D.BLUEPRINTS) do if b.out.kind=="arrow" then
-    local a={ id=b.out.id, name=b.name, mult=b.out.mult, color=b.out.color }
+for _,h in ipairs(D.ARROW_HEADS) do
+    local a={ id=h.id, name=h.name, mult=h.phys_mult, color=h.color }
     D.ARROWS[#D.ARROWS+1]=a; D.ARROW[a.id]=a
-end end
+end
 
 -- 角色技能（普通攻击也算技能）。数据驱动：
 --   effect: shot(发射,可多重) | dot(中毒持续伤害) | heal(回血) | buff(限时攻速/暴击)
@@ -302,26 +401,26 @@ D.TIER_ORDER = { "low", "mid", "high" }
 -- nodes.<cat>.mtier = 该区该大类的材料档(1-8)；kinds 由 mtier 在下方循环填成"该档三系"具体材料 id。
 D.REGIONS = {
     -- ===== 低级 1-15 =====
-    { id="meadow",  name="晨曦绿野", tier="low", lo=1, hi=4,  ilo=2, ihi=6,  rar={"poor","common","common","uncommon"}, rar_elite={"uncommon","rare"}, enemies={"boar","wolf"},          nodes={ wood={mtier=1,lvloff=0},  ore={mtier=1,lvloff=-1}, herb={mtier=1,lvloff=0} } },
-    { id="brook",   name="低语溪谷", tier="low", lo=3, hi=6,  ilo=4, ihi=9,  rar={"poor","common","common","uncommon"}, rar_elite={"uncommon","rare"}, enemies={"boar","wolf","bandit"},  nodes={ wood={mtier=1,lvloff=0},  ore={mtier=1,lvloff=0},  herb={mtier=1,lvloff=0} } },
-    { id="downs",   name="风吹荒原", tier="low", lo=5, hi=8,  ilo=6, ihi=11, rar={"common","common","uncommon","uncommon"}, rar_elite={"uncommon","rare"}, enemies={"wolf","bandit"},     nodes={ wood={mtier=2,lvloff=-1}, ore={mtier=2,lvloff=1},  herb={mtier=2,lvloff=0} } },
-    { id="darkwood",name="幽暗森林", tier="low", lo=7, hi=10, ilo=8, ihi=14, rar={"common","uncommon","uncommon","rare"}, rar_elite={"rare","epic"}, enemies={"wolf","bandit","ogre"},   nodes={ wood={mtier=2,lvloff=1},  ore={mtier=2,lvloff=0},  herb={mtier=2,lvloff=0} } },
-    { id="quarry",  name="碎石矿场", tier="low", lo=9, hi=12, ilo=10,ihi=16, rar={"common","uncommon","uncommon","rare"}, rar_elite={"rare","epic"}, enemies={"bandit","ogre"},          nodes={ wood={mtier=2,lvloff=0},  ore={mtier=3,lvloff=2},  herb={mtier=2,lvloff=-1} } },
-    { id="fen",     name="腐沼湿地", tier="low", lo=11,hi=14, ilo=12,ihi=18, rar={"uncommon","uncommon","rare","rare"}, rar_elite={"rare","epic"}, enemies={"wolf","ogre","wraith"},     nodes={ wood={mtier=3,lvloff=0},  ore={mtier=3,lvloff=0},  herb={mtier=3,lvloff=1} } },
+    { id="meadow",  name="晨曦绿野", tier="low", lo=1, hi=4,  ilo=2, ihi=6,  rar={"poor","common","common","uncommon"}, rar_elite={"uncommon","rare"}, enemies={"boar","wolf","bug"},          nodes={ wood={mtier=1,lvloff=0},  ore={mtier=1,lvloff=-1}, herb={mtier=1,lvloff=0} } },
+    { id="brook",   name="低语溪谷", tier="low", lo=3, hi=6,  ilo=4, ihi=9,  rar={"poor","common","common","uncommon"}, rar_elite={"uncommon","rare"}, enemies={"boar","wolf","bandit","bug"},  nodes={ wood={mtier=1,lvloff=0},  ore={mtier=1,lvloff=0},  herb={mtier=1,lvloff=0} } },
+    { id="downs",   name="风吹荒原", tier="low", lo=5, hi=8,  ilo=6, ihi=11, rar={"common","common","uncommon","uncommon"}, rar_elite={"uncommon","rare"}, enemies={"wolf","bandit","bat"},     nodes={ wood={mtier=2,lvloff=-1}, ore={mtier=2,lvloff=1},  herb={mtier=2,lvloff=0} } },
+    { id="darkwood",name="幽暗森林", tier="low", lo=7, hi=10, ilo=8, ihi=14, rar={"common","uncommon","uncommon","rare"}, rar_elite={"rare","epic"}, enemies={"wolf","bandit","ogre","bat"},   nodes={ wood={mtier=2,lvloff=1},  ore={mtier=2,lvloff=0},  herb={mtier=2,lvloff=0} } },
+    { id="quarry",  name="碎石矿场", tier="low", lo=9, hi=12, ilo=10,ihi=16, rar={"common","uncommon","uncommon","rare"}, rar_elite={"rare","epic"}, enemies={"bandit","ogre","gargoyle"},          nodes={ wood={mtier=2,lvloff=0},  ore={mtier=3,lvloff=2},  herb={mtier=2,lvloff=-1} } },
+    { id="fen",     name="腐沼湿地", tier="low", lo=11,hi=14, ilo=12,ihi=18, rar={"uncommon","uncommon","rare","rare"}, rar_elite={"rare","epic"}, enemies={"wolf","ogre","wraith","bug"},     nodes={ wood={mtier=3,lvloff=0},  ore={mtier=3,lvloff=0},  herb={mtier=3,lvloff=1} } },
     -- ===== 中级 16-35 =====
-    { id="ruins",   name="沉没遗迹", tier="mid", lo=15,hi=19, ilo=16,ihi=23, rar={"uncommon","rare","rare","epic"}, rar_elite={"epic","legendary"}, enemies={"bandit","ogre","wraith"}, nodes={ wood={mtier=3,lvloff=0},  ore={mtier=4,lvloff=1},  herb={mtier=3,lvloff=0} } },
-    { id="canyon",  name="赤红峡谷", tier="mid", lo=18,hi=22, ilo=20,ihi=27, rar={"uncommon","rare","rare","epic"}, rar_elite={"epic","legendary"}, enemies={"ogre","wraith","golem"},  nodes={ wood={mtier=4,lvloff=-1}, ore={mtier=4,lvloff=2},  herb={mtier=4,lvloff=1} } },
-    { id="hollow",  name="回响洞窟", tier="mid", lo=21,hi=25, ilo=23,ihi=31, rar={"rare","rare","epic","epic"}, rar_elite={"epic","legendary"}, enemies={"wraith","golem","ogre"},      nodes={ wood={mtier=4,lvloff=0},  ore={mtier=4,lvloff=1},  herb={mtier=4,lvloff=0} } },
-    { id="peak",    name="霜寒峰",   tier="mid", lo=24,hi=28, ilo=26,ihi=34, rar={"rare","rare","epic","epic"}, rar_elite={"epic","legendary"}, enemies={"ogre","wraith","golem"},      nodes={ wood={mtier=5,lvloff=0},  ore={mtier=5,lvloff=1},  herb={mtier=5,lvloff=1} } },
-    { id="wastes",  name="灰烬废土", tier="mid", lo=27,hi=31, ilo=29,ihi=37, rar={"rare","epic","epic","legendary"}, rar_elite={"epic","legendary"}, enemies={"wraith","golem"},        nodes={ wood={mtier=5,lvloff=-1}, ore={mtier=5,lvloff=2},  herb={mtier=5,lvloff=0} } },
-    { id="catacomb",name="尘封地穴", tier="mid", lo=30,hi=34, ilo=32,ihi=40, rar={"rare","epic","epic","legendary"}, rar_elite={"epic","legendary"}, enemies={"wraith","golem","ogre"}, nodes={ wood={mtier=5,lvloff=0},  ore={mtier=6,lvloff=1},  herb={mtier=5,lvloff=0} } },
+    { id="ruins",   name="沉没遗迹", tier="mid", lo=15,hi=19, ilo=16,ihi=23, rar={"uncommon","rare","rare","epic"}, rar_elite={"epic","legendary"}, enemies={"bandit","ogre","wraith","lich"}, nodes={ wood={mtier=3,lvloff=0},  ore={mtier=4,lvloff=1},  herb={mtier=3,lvloff=0} } },
+    { id="canyon",  name="赤红峡谷", tier="mid", lo=18,hi=22, ilo=20,ihi=27, rar={"uncommon","rare","rare","epic"}, rar_elite={"epic","legendary"}, enemies={"ogre","wraith","golem","lava"},  nodes={ wood={mtier=4,lvloff=-1}, ore={mtier=4,lvloff=2},  herb={mtier=4,lvloff=1} } },
+    { id="hollow",  name="回响洞窟", tier="mid", lo=21,hi=25, ilo=23,ihi=31, rar={"rare","rare","epic","epic"}, rar_elite={"epic","legendary"}, enemies={"wraith","golem","gargoyle"},      nodes={ wood={mtier=4,lvloff=0},  ore={mtier=4,lvloff=1},  herb={mtier=4,lvloff=0} } },
+    { id="peak",    name="霜寒峰",   tier="mid", lo=24,hi=28, ilo=26,ihi=34, rar={"rare","rare","epic","epic"}, rar_elite={"epic","legendary"}, enemies={"ogre","golem","icewolf"},      nodes={ wood={mtier=5,lvloff=0},  ore={mtier=5,lvloff=1},  herb={mtier=5,lvloff=1} } },
+    { id="wastes",  name="灰烬废土", tier="mid", lo=27,hi=31, ilo=29,ihi=37, rar={"rare","epic","epic","legendary"}, rar_elite={"epic","legendary"}, enemies={"wraith","golem","lava"},        nodes={ wood={mtier=5,lvloff=-1}, ore={mtier=5,lvloff=2},  herb={mtier=5,lvloff=0} } },
+    { id="catacomb",name="尘封地穴", tier="mid", lo=30,hi=34, ilo=32,ihi=40, rar={"rare","epic","epic","legendary"}, rar_elite={"epic","legendary"}, enemies={"wraith","golem","lich","revenant"}, nodes={ wood={mtier=5,lvloff=0},  ore={mtier=6,lvloff=1},  herb={mtier=5,lvloff=0} } },
     -- ===== 高级 36-60 =====
-    { id="spire",   name="苍穹尖塔", tier="high",lo=35,hi=40, ilo=37,ihi=46, rar={"epic","epic","legendary","legendary"}, rar_elite={"legendary","legendary"}, enemies={"golem","frost"},   nodes={ wood={mtier=6,lvloff=0},  ore={mtier=6,lvloff=1},  herb={mtier=6,lvloff=0} } },
-    { id="abyss",   name="深渊裂口", tier="high",lo=39,hi=44, ilo=41,ihi=50, rar={"epic","epic","legendary","legendary"}, rar_elite={"legendary","legendary"}, enemies={"wraith","voidcat"},nodes={ wood={mtier=6,lvloff=-1}, ore={mtier=6,lvloff=2},  herb={mtier=6,lvloff=1} } },
-    { id="cinder",  name="炽炎熔狱", tier="high",lo=43,hi=48, ilo=45,ihi=54, rar={"epic","legendary","legendary","legendary"}, rar_elite={"legendary","legendary"}, enemies={"drake","golem"}, nodes={ wood={mtier=7,lvloff=0},  ore={mtier=7,lvloff=1},  herb={mtier=7,lvloff=0} } },
-    { id="glacier", name="永冻冰川", tier="high",lo=47,hi=52, ilo=49,ihi=58, rar={"epic","legendary","legendary","legendary"}, rar_elite={"legendary","legendary"}, enemies={"frost","golem"}, nodes={ wood={mtier=7,lvloff=0},  ore={mtier=7,lvloff=1},  herb={mtier=7,lvloff=-1} } },
-    { id="rift",    name="虚空断界", tier="high",lo=51,hi=56, ilo=53,ihi=62, rar={"legendary","legendary","legendary","legendary"}, rar_elite={"legendary","legendary"}, enemies={"voidcat","revenant"}, nodes={ wood={mtier=7,lvloff=-1}, ore={mtier=8,lvloff=2}, herb={mtier=7,lvloff=1} } },
-    { id="throne",  name="陨灭王座", tier="high",lo=55,hi=60, ilo=57,ihi=66, rar={"legendary","legendary","legendary","legendary"}, rar_elite={"legendary","legendary"}, enemies={"drake","revenant","golem"}, nodes={ wood={mtier=8,lvloff=0}, ore={mtier=8,lvloff=1}, herb={mtier=8,lvloff=0} } },
+    { id="spire",   name="苍穹尖塔", tier="high",lo=35,hi=40, ilo=37,ihi=46, rar={"epic","epic","legendary","legendary"}, rar_elite={"legendary","legendary"}, enemies={"golem","frost","gargoyle"},   nodes={ wood={mtier=6,lvloff=0},  ore={mtier=6,lvloff=1},  herb={mtier=6,lvloff=0} } },
+    { id="abyss",   name="深渊裂口", tier="high",lo=39,hi=44, ilo=41,ihi=50, rar={"epic","epic","legendary","legendary"}, rar_elite={"legendary","legendary"}, enemies={"wraith","voidcat","lich"},nodes={ wood={mtier=6,lvloff=-1}, ore={mtier=6,lvloff=2},  herb={mtier=6,lvloff=1} } },
+    { id="cinder",  name="炽炎熔狱", tier="high",lo=43,hi=48, ilo=45,ihi=54, rar={"epic","legendary","legendary","legendary"}, rar_elite={"legendary","legendary"}, enemies={"drake","golem","lava"}, nodes={ wood={mtier=7,lvloff=0},  ore={mtier=7,lvloff=1},  herb={mtier=7,lvloff=0} } },
+    { id="glacier", name="永冻冰川", tier="high",lo=47,hi=52, ilo=49,ihi=58, rar={"epic","legendary","legendary","legendary"}, rar_elite={"legendary","legendary"}, enemies={"frost","golem","icewolf"}, nodes={ wood={mtier=7,lvloff=0},  ore={mtier=7,lvloff=1},  herb={mtier=7,lvloff=-1} } },
+    { id="rift",    name="虚空断界", tier="high",lo=51,hi=56, ilo=53,ihi=62, rar={"legendary","legendary","legendary","legendary"}, rar_elite={"legendary","legendary"}, enemies={"voidcat","revenant","lich"}, nodes={ wood={mtier=7,lvloff=-1}, ore={mtier=8,lvloff=2}, herb={mtier=7,lvloff=1} } },
+    { id="throne",  name="陨灭王座", tier="high",lo=55,hi=60, ilo=57,ihi=66, rar={"legendary","legendary","legendary","legendary"}, rar_elite={"legendary","legendary"}, enemies={"drake","revenant","golem","voidcat"}, nodes={ wood={mtier=8,lvloff=0}, ore={mtier=8,lvloff=1}, herb={mtier=8,lvloff=0} } },
 }
 -- 填 nodes.<cat>.kinds = 该档三系材料 id（采集随机抽一系→产出具体材料）
 for _,rg in ipairs(D.REGIONS) do
@@ -332,18 +431,41 @@ for _,rg in ipairs(D.REGIONS) do
         end
     end
 end
+-- ============================================================================
+-- 怪物家族(§4.1)：family + 元素抗性，让箭元素有意义。
+--   resist[element] = 元素伤害系数(>1 弱点 / <1 抵抗 / 缺省=1 普通)。流血/穿甲走物理不查这表。
+--   armor_mul：family 级护甲倍率(construct 高甲 ×1.3，逼穿甲/弩)。
+--   drops：family 偏向掉落(本期登记，combat.drop_loot 取部分接上)。
+-- ============================================================================
+D.ENEMY_FAMILY = {
+    beast    = { name="野兽",   resist={fire=1.1,  poison=0.9},            armor_mul=1.0, drops={feather=0.30, oil=0.15, hide=0.20} },
+    humanoid = { name="人形",   resist={},                                 armor_mul=1.0, drops={hide=0.25, oil=0.10} },
+    undead   = { name="不死",   resist={fire=1.25, frost=0.8, poison=0.6}, armor_mul=1.0, drops={oil=0.10} },
+    construct= { name="构造",   resist={fire=0.9,  frost=0.9, poison=0.4}, armor_mul=1.3, drops={bladestone=0.2} },  -- 高甲，怕穿甲
+    elemental= { name="元素",   resist={fire=0.7,  frost=1.3, poison=0.8}, armor_mul=0.9, drops={venomsac=0.15} },   -- 抵抗火/弱冰(占位)
+    dragon   = { name="巨龙",   resist={fire=0.7,  frost=0.7},             armor_mul=1.1, drops={oil=0.40, hide=0.30} },
+    void     = { name="虚空",   resist={fire=0.9,  frost=0.9, poison=0.8}, armor_mul=1.0, drops={venomsac=0.10} },  -- 净化克之
+}
+
 D.ENEMY_ARCH = {
-    boar  ={ name="野猪",   hp=1.0, dmg=1.0, armor=0.3, spd=0.55, color={0.6,0.45,0.35} },
-    wolf  ={ name="野狼",   hp=0.8, dmg=1.2, armor=0.2, spd=0.85, color={0.5,0.5,0.55} },
-    bandit={ name="强盗",   hp=1.1, dmg=1.1, armor=0.5, spd=0.6,  color={0.7,0.5,0.3} },
-    ogre  ={ name="食人魔", hp=1.8, dmg=1.5, armor=0.6, spd=0.4,  color={0.45,0.6,0.3} },
-    wraith={ name="幽魂",   hp=1.2, dmg=1.6, armor=0.3, spd=0.7,  color={0.55,0.45,0.75} },
-    golem ={ name="石巨人", hp=2.6, dmg=1.4, armor=1.2, spd=0.35, color={0.6,0.62,0.68} },
+    boar  ={ name="野猪",   family="beast",    hp=1.0, dmg=1.0, armor=0.3, spd=0.55, color={0.6,0.45,0.35} },
+    wolf  ={ name="野狼",   family="beast",    hp=0.8, dmg=1.2, armor=0.2, spd=0.85, color={0.5,0.5,0.55} },
+    bandit={ name="强盗",   family="humanoid", hp=1.1, dmg=1.1, armor=0.5, spd=0.6,  color={0.7,0.5,0.3} },
+    ogre  ={ name="食人魔", family="humanoid", hp=1.8, dmg=1.5, armor=0.6, spd=0.4,  color={0.45,0.6,0.3} },
+    wraith={ name="幽魂",   family="undead",   hp=1.2, dmg=1.6, armor=0.3, spd=0.7,  color={0.55,0.45,0.75} },
+    golem ={ name="石巨人", family="construct",hp=2.6, dmg=1.4, armor=1.2, spd=0.35, color={0.6,0.62,0.68} },
+    -- 新增铺档敌型：虫(毒囊)/巨蝠/石像鬼/冰狼/熔岩兽/亡灵法师 等，按 family 主题化
+    bug   ={ name="毒虫",   family="beast",    hp=0.7, dmg=1.0, armor=0.2, spd=0.9,  color={0.55,0.7,0.35}, drop_mat="venomsac" },
+    bat   ={ name="巨蝠",   family="beast",    hp=0.9, dmg=1.3, armor=0.2, spd=0.95, color={0.4,0.35,0.45} },
+    gargoyle={name="石像鬼",family="construct",hp=2.0, dmg=1.5, armor=1.0, spd=0.45, color={0.5,0.52,0.58} },
+    icewolf={ name="冰狼",   family="beast",    hp=1.3, dmg=1.6, armor=0.4, spd=0.85, color={0.6,0.85,0.95} },
+    lava  ={ name="熔岩兽", family="elemental",hp=1.7, dmg=1.9, armor=0.6, spd=0.5,  color={0.85,0.45,0.25} },
+    lich  ={ name="亡灵法师",family="undead",  hp=1.4, dmg=2.0, armor=0.4, spd=0.6,  color={0.5,0.55,0.7} },
     -- 高级敌型（36-60 高区用）
-    frost   ={ name="霜魔",     hp=1.5, dmg=1.7, armor=0.5, spd=0.6,  color={0.6,0.8,0.95} },
-    voidcat ={ name="虚空兽",   hp=1.4, dmg=2.0, armor=0.4, spd=0.78, color={0.55,0.4,0.7} },
-    drake   ={ name="幼龙",     hp=2.2, dmg=1.8, armor=0.9, spd=0.5,  color={0.75,0.4,0.32} },
-    revenant={ name="亡灵骑士", hp=1.9, dmg=1.6, armor=1.1, spd=0.55, color={0.5,0.55,0.62} },
+    frost   ={ name="霜魔",     family="elemental",hp=1.5, dmg=1.7, armor=0.5, spd=0.6,  color={0.6,0.8,0.95} },
+    voidcat ={ name="虚空兽",   family="void",     hp=1.4, dmg=2.0, armor=0.4, spd=0.78, color={0.55,0.4,0.7} },
+    drake   ={ name="幼龙",     family="dragon",   hp=2.2, dmg=1.8, armor=0.9, spd=0.5,  color={0.75,0.4,0.32} },
+    revenant={ name="亡灵骑士", family="undead",   hp=1.9, dmg=1.6, armor=1.1, spd=0.55, color={0.5,0.55,0.62} },
 }
 -- 精英/稀有：概率 p、hp/atk/armor 放大、装等加成、稀有度升档概率。
 -- ★ atk 系数保守（elite 1.15 / rare 1.3），等级用区间随机而非锁上限，避免低区强制阵亡。

@@ -24,6 +24,7 @@ local function sy(v) return v*screen.sh end
 local setc = draw.setc
 local panel, button = draw.panel, draw.button
 local inv_count, ammo_count, inv_add = inv.inv_count, inv.ammo_count, inv.inv_add
+local ammo_key_count = inv.ammo_key_count
 local gear_color, gear_full_name = inv.gear_color, inv.gear_full_name
 local recalc = prog.recalc
 
@@ -59,8 +60,6 @@ local function gear_detail_lines(g)
     return lines
 end
 
-local function arrow_desc(t) return "战斗消耗的弹药。伤害倍率 x"..t.mult.."。" end
-
 -- 构建 tooltip 内容：标题/标题色/副标题/逐行/底部按钮文案
 function tooltip.tt_content(tt)
     if tt.kind=="gear" then
@@ -87,12 +86,18 @@ function tooltip.tt_content(tt)
     elseif tt.kind=="potion" then
         local lines={ {"持有："..inv_count("potion",tt.id), UI.text}, {POT_DESC[tt.id] or "", UI.dim} }
         return POT_NAME[tt.id], POT_COLOR[tt.id], "消耗品 · 可堆叠", lines, nil
-    else -- arrow
-        local t = ARROW[tt.id]; local bp = BP[tt.id]
-        local lines={ {"持有："..ammo_count(tt.id).." 支", UI.text}, {arrow_desc(t), UI.dim} }
-        if bp then local parts={}; for m,n in pairs(bp.cost) do parts[#parts+1]=(MAT_NAME[m] or m).."x"..n end
-            lines[#lines+1]={ "配方："..table.concat(parts,"  "), {0.6,0.7,0.85} } end
-        return t.name, t.color, "箭矢 · 可堆叠", lines, nil
+    else -- arrow（三轴成品箭：箭头档/元素/翎羽）
+        local a = { head=tt.head, element=tt.element, feather=tt.feather }
+        local h, e, f = D.arrow_head(a), D.arrow_elem(a), D.arrow_feat(a)
+        local have = inv.ammo_count(h.id)
+        local lines = {
+            { "持有："..ammo_key_count(a).." 支", UI.text },
+            { "箭头  "..h.name.."  物理 x"..h.phys_mult, {0.8,0.8,0.85} },
+            { "元素  "..e.name, e.color },
+            { e.desc, UI.dim },
+        }
+        if f.id~="plain" then lines[#lines+1] = { "翎羽  "..f.name.."  "..f.desc, f.color } end
+        return D.arrow_name(a), D.arrow_color(a), "箭矢 · 三轴成品 · 可堆叠", lines, nil
     end
 end
 

@@ -112,12 +112,12 @@ function bag_view.draw()
     for i=1,(state.player.ammo_cap or 0) do
         local x=ax+(i-1)*(acell+agap)
         local it=state.player.ammo[i]
-        local bc = it and item_color({kind="arrow",id=it.id}) or {0.3,0.31,0.4}
+        local bc = it and item_color(it) or {0.3,0.31,0.4}
         if it then panel(x,ay,acell,acell,{bc[1]*0.16,bc[2]*0.16,bc[3]*0.18,0.95},bc,6*sw)
         else panel(x,ay,acell,acell,{0.1,0.11,0.15,0.9},{0.22,0.23,0.3},6*sw) end
         if it and not (state.drag and state.drag.moved and state.drag.from=="ammo" and state.drag.slot==i) then
             love.graphics.push("all"); if dim_ammo then love.graphics.setColor(1,1,1,0.4) end
-            icon_arrow(x+acell/2, ay+acell/2-sy(2), acell*0.3, ARROW[it.id] and ARROW[it.id].color)
+            icon_arrow(x+acell/2, ay+acell/2-sy(2), acell*0.3, D.arrow_color(it))
             setc(UI.text, dim_ammo and 0.4 or 1); love.graphics.printf(it.qty, x, ay+acell-sy(14), acell-sx(2), "right")
             love.graphics.pop()
         end
@@ -149,7 +149,7 @@ function bag_view.draw_drag()
     local sw = screen.sw
     local _,_,_,_,_,_,cell = bag_grid()
     local it=state.drag.item
-    local norm = (state.drag.from=="ammo") and {kind="arrow",id=it.id,qty=it.qty} or it
+    local norm = it
     local c=item_color(norm)
     setc(c,0.85); rrect("fill", state.drag.x-cell/2, state.drag.y-cell/2, cell, cell, 6*sw)
     draw_item_icon(norm, state.drag.x, state.drag.y-sy(2), cell*0.3)
@@ -197,7 +197,7 @@ function bag_view.drag_release(x,y)
     if not tgrid then for i=1,BAG_SLOTS do local cx,cyy=bag_cell_rect(i,gx,gy,cell,gap); if hit(x,y,cx,cyy,cell,cell) then tgrid="bag"; tslot=i; break end end end
     -- 未移动且落回原格 → 点击看详情
     if not d.moved and tgrid==d.from and tslot==d.slot then
-        if d.from=="ammo" then local it=state.player.ammo[d.slot]; if it then state.tooltip={kind="arrow",id=it.id} end
+        if d.from=="ammo" then local it=state.player.ammo[d.slot]; if it then state.tooltip={kind="arrow", head=it.head, element=it.element, feather=it.feather} end
         else local it=state.player.inv[d.slot]; if it then
             if it.kind=="gear" then state.tooltip={ kind="gear", g=it.gear, src="bag", slot=d.slot } else state.tooltip={ kind=it.kind, id=it.id } end end
         end
