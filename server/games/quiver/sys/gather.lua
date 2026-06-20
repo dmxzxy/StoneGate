@@ -11,7 +11,7 @@ local prog = require("sys.progression")
 local fx = require("fx")
 
 local ACTIVITIES = D.ACTIVITIES
-local NODE_BASE, NODE_NAME = D.NODE_BASE, D.NODE_NAME
+local NODE_BASE = D.NODE_BASE
 local MAT_REQ_FAIL = D.MAT_REQ_FAIL
 local MAT_NAME, MAT_COLOR = D.MAT_NAME, D.MAT_COLOR
 local NODE_HOME_X = D.NODE_HOME_X
@@ -29,7 +29,7 @@ function gather.make_node(mat)
     local lvl = math.max(1, math.min(99, math.random(state.region.lo, state.region.hi) + (nd.lvloff or 0)))
     local rich = math.random() < 0.05
     if rich then lvl = lvl + math.ceil(state.region.hi*0.2) end   -- 富集节点：等级更高(约+20%)、产量翻倍
-    return { phase="found", phase_t=0, mat=mat, kind=kind, name=NODE_NAME[kind] or kind, color=MAT_COLOR[mat],
+    return { phase="found", phase_t=0, mat=mat, kind=kind, name=MAT_NAME[kind] or kind, color=MAT_COLOR[kind] or MAT_COLOR[mat],
         level=lvl, req=lvl, rich=rich, max_dur=math.ceil(3*NODE_BASE[mat].hp*(1+lvl*0.12)), dur=math.ceil(3*NODE_BASE[mat].hp*(1+lvl*0.12)),
         atb=0, flash=0, hurt=0, x=DESIGN_W+60 }
 end
@@ -37,10 +37,16 @@ function gather.finish_node(nd, key)
     local lvl = state.player.skill[key].lvl
     local y = math.max(1, math.floor(NODE_BASE[nd.mat].yield * (1+nd.level*0.18) * (1+(lvl-1)*0.04)))
     if nd.rich then y = y*2 end
-    inv.inv_add("mat", nd.mat, y)
+    inv.inv_add("mat", nd.kind, y)   -- 产出具体材料(该档随机一系)，不再归并大类
+    -- 砍柴小概率掉鸟巢羽毛(所有箭必需的低门槛二级材料)
+    if nd.mat=="wood" and math.random() < 0.10 then inv.inv_add("mat", "feather", 1+math.random(2)) end
+    -- 采矿副产利刃石/硫磺(元素箭附材)
+    if nd.mat=="ore" and math.random() < 0.08 then
+        inv.inv_add("mat", (math.random()<0.5) and "bladestone" or "sulfur", 1)
+    end
     prog.gain_gather_xp(key, math.floor(nd.level*5+6))
     fx.burst(NODE_HOME_X, DESIGN_H*0.42, nd.color, 12)
-    fx.add_float(NODE_HOME_X, DESIGN_H*0.20, "+"..y.." "..(MAT_NAME[nd.mat] or nd.mat), nd.color, 1.1)
+    fx.add_float(NODE_HOME_X, DESIGN_H*0.20, "+"..y.." "..(MAT_NAME[nd.kind] or nd.kind), nd.color, 1.1)
     nd.phase="done"; nd.phase_t=0
 end
 function gather.node_machine(dt)

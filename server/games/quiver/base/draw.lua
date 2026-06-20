@@ -82,15 +82,46 @@ end
 -- 图标（用图形代替文字）
 -- ============================================================================
 function draw.icon_mat(m, cx, cy, s)
-    if m=="wood" then
-        setc({0.55,0.38,0.2}); love.graphics.rectangle("fill",cx-s,cy-s*0.55,s*2,s*1.1,s*0.4)
-        setc({0.72,0.52,0.3}); love.graphics.circle("fill",cx+s*0.7,cy,s*0.42); setc({0.45,0.3,0.16}); love.graphics.circle("line",cx+s*0.7,cy,s*0.42)
-    elseif m=="ore" then
-        setc({0.5,0.52,0.58}); love.graphics.polygon("fill",cx-s,cy+s*0.6,cx-s*0.4,cy-s,cx+s*0.6,cy-s*0.7,cx+s,cy+s*0.6)
-        setc({0.85,0.87,0.95}); love.graphics.circle("fill",cx-s*0.1,cy-s*0.05,s*0.22); love.graphics.circle("fill",cx+s*0.4,cy+s*0.2,s*0.14)
+    -- m 可以是采集大类(wood/ore/herb)或具体材料 id(D.MAT[id])。
+    -- 形状按大类(木=原木/矿=矿石/草=双叶)，颜色按材料色，再按"系"加小标记(箭簇尖角/兵刃刃纹/甲胄块面)。
+    local def = D.MAT and D.MAT[m]
+    local cat = def and def.cat or m
+    local col = (D.MAT_COLOR and D.MAT_COLOR[m]) or nil
+    if cat=="wood" then
+        local c1 = col or {0.55,0.38,0.2}
+        setc(c1); love.graphics.rectangle("fill",cx-s,cy-s*0.55,s*2,s*1.1,s*0.4)
+        setc({math.min(1,c1[1]+0.17),math.min(1,c1[2]+0.14),math.min(1,c1[3]+0.1)}); love.graphics.circle("fill",cx+s*0.7,cy,s*0.42)
+        setc({c1[1]*0.7,c1[2]*0.7,c1[3]*0.7}); love.graphics.circle("line",cx+s*0.7,cy,s*0.42)
+    elseif cat=="ore" then
+        local c1 = col or {0.5,0.52,0.58}
+        setc(c1); love.graphics.polygon("fill",cx-s,cy+s*0.6,cx-s*0.4,cy-s,cx+s*0.6,cy-s*0.7,cx+s,cy+s*0.6)
+        setc({math.min(1,c1[1]+0.25),math.min(1,c1[2]+0.25),math.min(1,c1[3]+0.25)}); love.graphics.circle("fill",cx-s*0.1,cy-s*0.05,s*0.22); love.graphics.circle("fill",cx+s*0.4,cy+s*0.2,s*0.14)
     else -- herb
-        setc({0.4,0.7,0.35}); love.graphics.ellipse("fill",cx-s*0.45,cy-s*0.1,s*0.5,s*0.95); love.graphics.ellipse("fill",cx+s*0.45,cy-s*0.1,s*0.5,s*0.95)
-        setc({0.3,0.5,0.22}); love.graphics.setLineWidth(math.max(1,1.4*screen.sw)); love.graphics.line(cx,cy-s,cx,cy+s); love.graphics.setLineWidth(1)
+        local c1 = col or {0.4,0.7,0.35}
+        setc(c1); love.graphics.ellipse("fill",cx-s*0.45,cy-s*0.1,s*0.5,s*0.95); love.graphics.ellipse("fill",cx+s*0.45,cy-s*0.1,s*0.5,s*0.95)
+        setc({c1[1]*0.7,c1[2]*0.7,c1[3]*0.6}); love.graphics.setLineWidth(math.max(1,1.4*screen.sw)); love.graphics.line(cx,cy-s,cx,cy+s); love.graphics.setLineWidth(1)
+    end
+    -- 系标记：仅具体材料显示，区分一个大类内的三系角色
+    if def then
+        local sys = def.system
+        if sys=="head" then  -- 箭簇=右上尖角
+            setc({0.95,0.95,1.0}); love.graphics.polygon("fill", cx+s*0.55,cy-s*0.85, cx+s*0.95,cy-s*0.55, cx+s*0.55,cy-s*0.45)
+        elseif sys=="blade" then  -- 兵刃=斜刃纹
+            setc({0.95,0.95,1.0}); love.graphics.setLineWidth(math.max(1,1.6*screen.sw)); love.graphics.line(cx-s*0.4,cy+s*0.5, cx+s*0.5,cy-s*0.5); love.graphics.setLineWidth(1)
+        elseif sys=="plate" then  -- 甲胄=块面方框
+            setc({0.9,0.92,1.0}); love.graphics.rectangle("line", cx-s*0.45,cy-s*0.35, s*0.9, s*0.7)
+        elseif sys=="shaft" then  -- 箭杆=竖直细线
+            setc({1,1,0.9}); love.graphics.setLineWidth(math.max(1,1.4*screen.sw)); love.graphics.line(cx,cy-s*0.7,cx,cy+s*0.7); love.graphics.setLineWidth(1)
+        elseif sys=="bowarm" then  -- 弓臂=弧
+            setc({1,1,0.9}); love.graphics.setLineWidth(math.max(1,1.4*screen.sw)); love.graphics.arc("line","open",cx,cy,s*0.7,-0.9,0.9); love.graphics.setLineWidth(1)
+        elseif sys=="char" then  -- 薪炭=小火点
+            setc({1,0.6,0.2}); love.graphics.circle("fill",cx,cy-s*0.5,s*0.18)
+        elseif sys=="essence" then  -- 精萃=亮点
+            setc({1,1,0.7}); love.graphics.circle("fill",cx,cy-s*0.45,s*0.16)
+        elseif sys=="toxic" then  -- 毒性=三个小点
+            setc({0.6,1,0.4}); love.graphics.circle("fill",cx-s*0.3,cy+s*0.3,s*0.1); love.graphics.circle("fill",cx+s*0.3,cy+s*0.3,s*0.1); love.graphics.circle("fill",cx,cy+s*0.45,s*0.1)
+        end
+        -- 档位角标：右下小点数（高档更亮）
     end
 end
 local icon_mat = draw.icon_mat

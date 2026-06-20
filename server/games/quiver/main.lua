@@ -117,8 +117,10 @@ local function init()
     state.player.equip.bow = roll_gear("bow", 1, "poor")
     state.player.equip.quiver = roll_gear("quiver", 1, "common")
     recalc()
-    -- 初始物品：材料入背包，箭矢入箭袋
-    inv_add("mat","wood",8); inv_add("mat","ore",4); inv_add("mat","herb",2); ammo_add("wood",30)
+    -- 初始物品：T1 系材料入背包(够接通制箭/造锭/药剂) + 羽毛，箭矢入箭袋
+    inv_add("mat","w_shaft1",8); inv_add("mat","o_head1",4); inv_add("mat","h_heal1",2)
+    inv_add("mat","feather",6); inv_add("mat","o_blade2",2)
+    ammo_add("wood",30)
     state.player.hp=state.player.max_hp
     state.region=REGIONS[1]; state.stage=0; fx.floats={}; fx.particles={}; state.projectiles={}; state.result_banner=nil; fx.toast=nil
     state.activity="rest"; state.panel_open=nil; state.enemy=nil
@@ -131,7 +133,7 @@ end
 -- 收进单个 save 表（避免主 chunk 触及 Lua 200 局部变量上限；文件拆分后会移到 base/save.lua）
 local save = {}
 save.FILE = "quiver/save.lua"
-save.VERSION = 1
+save.VERSION = 2
 local save_timer = 0
 
 -- 序列化一个纯数据值（数字/字符串/布尔/表）到 out 数组
@@ -187,7 +189,18 @@ function save.migrate(data)
     if type(data)~="table" then return nil end
     local v = data.version or 1
     if v > save.VERSION then return nil end     -- 来自更新版本：不兼容，回退新开局
-    -- 第一期只有 v1；将来：while v<save.VERSION do upgraders[v](data); v=v+1 end
+    -- v1→v2：材料细化(C1)。旧通用材料 wood/ore/herb 迁移为对应 T1 系主材；
+    --   inv 里的 mat 物品改 id；技能/图谱配方的 cost 走当前 data 表(不存档)，无需迁移。
+    --   未知/已删除材料 id 在 load 期由 D.MAT/SECONDARY/旧中间材料过滤(见下)，安全丢弃不崩。
+    if v < 2 then
+        local map = { wood="w_shaft1", ore="o_head1", herb="h_heal1" }
+        if type(data.inv)=="table" then
+            for _,it in pairs(data.inv) do
+                if type(it)=="table" and it.kind=="mat" and map[it.id] then it.id = map[it.id] end
+            end
+        end
+        data.version = 2
+    end
     return data
 end
 
@@ -215,8 +228,14 @@ function save.load()
         state.player.bp_known.wood = true
         state.player.skills = {}; for _,id in ipairs(data.skills or {}) do if SKILLS[id] then state.player.skills[#state.player.skills+1]=id end end
         if #state.player.skills==0 then state.player.skills={"shoot"} end
-        -- inv/ammo：定长补 nil（稀疏表回填，绝不丢洞后物品）
-        state.player.inv = {}; if data.inv then for i=1,BAG_SLOTS do state.player.inv[i]=data.inv[i] end end
+        -- inv/ammo：定长补 nil（稀疏表回填，绝不丢洞后物品）。
+        -- 材料物品按当前 data 表校验 id：未知/已删除材料安全丢弃(留空格)，防 tooltip/图标查 nil 崩。
+        state.player.inv = {}
+        if data.inv then for i=1,BAG_SLOTS do
+            local it = data.inv[i]
+            if it and it.kind=="mat" and not (D.MAT_NAME[it.id]) then it=nil end
+            state.player.inv[i]=it
+        end end
         state.player.ammo = {}; if data.ammo then for i,it in pairs(data.ammo) do state.player.ammo[i]=it end end
         -- 引用按 id 查回
         local rg; for _,r in ipairs(REGIONS) do if r.id==data.region_id then rg=r end end

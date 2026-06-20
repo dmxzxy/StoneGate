@@ -58,7 +58,7 @@ function gather_view.draw()
     end
     -- 顶部：材料图标 + 持有数 + 采集职业等级/经验环
     icon_mat(a.mat, cx-sx(40), py-sy(120), sx(13))
-    love.graphics.setFont(draw.font_big); setc(MAT_COLOR[a.mat]); love.graphics.print(inv_count("mat",a.mat), cx-sx(18), py-sy(134))
+    love.graphics.setFont(draw.font_big); setc(MAT_COLOR[a.mat]); love.graphics.print(inv.cat_count(a.mat), cx-sx(18), py-sy(134))
     local s = state.player.skill[key]
     ring(cx+sx(40), py-sy(116), sx(11), s.xp/gather_need(s.lvl), MAT_COLOR[a.mat])
     love.graphics.setFont(draw.font_sm); setc(UI.text); love.graphics.printf("Lv"..s.lvl, cx+sx(40)-sx(16), py-sy(120), sx(32), "center")

@@ -58,8 +58,12 @@ end
 function combat.drop_loot()
     prog.gain_xp(math.floor(state.enemy.level*6+10))
     state.player.gold = state.player.gold + math.floor(state.enemy.level*2+math.random(1,4))
-    -- 战斗给经验/金币/装备；材料靠各类挂机采集（砍柴/采矿/采药）
+    -- 战斗给经验/金币/装备 + 少量二级材料(羽毛/油/兽皮/毒囊)；主材靠采集
     local rk = ENEMY_RANK[state.enemy.rank or "normal"]
+    local elite = state.enemy.rank~="normal"
+    -- 二级材料掉落(喂制箭/护甲链/元素箭)：精英/稀有翻倍机会
+    local function droproll(id, p) if math.random() < (elite and p*2 or p) then inv.inv_add("mat", id, 1+math.random(2)) end end
+    droproll("feather", 0.30); droproll("hide", 0.18); droproll("oil", 0.12); droproll("venomsac", 0.08)
     local drop_p = (state.enemy.rank=="normal") and 0.3 or 1.0   -- 精英/稀有保底出装
     if math.random() < drop_p then
         local ilvl = (state.enemy.rank=="normal") and math.random(state.region.ilo, state.region.ihi) or (state.region.ihi + rk.ilvl_bonus)

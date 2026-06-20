@@ -27,6 +27,14 @@ function inv.max_stack(kind) return (kind=="arrow") and 200 or 9999 end  -- 箭�
 function inv.inv_count(kind,id)
     local n=0; for i=1,BAG_SLOTS do local it=state.player.inv[i]; if it and it.kind==kind and it.id==id then n=n+it.qty end end; return n
 end
+-- 某采集大类(wood/ore/herb)在背包的材料总数(72 主材按 D.MAT[id].cat 归类，供采集页头部展示)
+function inv.cat_count(cat)
+    local MAT=D.MAT; local n=0
+    for i=1,BAG_SLOTS do local it=state.player.inv[i]
+        if it and it.kind=="mat" and MAT[it.id] and MAT[it.id].cat==cat then n=n+it.qty end
+    end
+    return n
+end
 function inv.inv_add(kind,id,qty,gear)
     if kind=="gear" then
         for i=1,BAG_SLOTS do if not state.player.inv[i] then state.player.inv[i]={kind="gear",gear=gear,qty=1}; return true end end
