@@ -58,7 +58,10 @@ function skills_view.draw()
         local iw=sx(20); local rx=px+sx(14); local ry=py+sy(20)
         for k,id in ipairs(rot) do
             local s=SKILLS[id]; local cx=rx+(k-1)*iw
-            setc({s.color[1]*0.3,s.color[2]*0.3,s.color[3]*0.32,0.9}); love.graphics.circle("fill", cx+iw/2, ry, sy(9))
+            -- 像素小槽底(技能色暗版硬边方块)
+            local sb=sy(9)
+            setc({s.color[1]*0.3,s.color[2]*0.3,s.color[3]*0.32,0.95}); rrect("fill", cx+iw/2-sb, ry-sb, sb*2, sb*2)
+            setc(s.color); love.graphics.setLineWidth(math.max(1,sx(1))); rrect("line", cx+iw/2-sb, ry-sb, sb*2, sb*2); love.graphics.setLineWidth(1)
             draw_skill_icon(s, cx+iw/2, ry, sy(7))
             if k<#rot then setc(UI.dim); love.graphics.print("›", cx+iw-sx(4), ry-sy(7)) end
         end
@@ -67,7 +70,9 @@ function skills_view.draw()
         local s=SKILLS[id]; local x,y,rw,rh=skill_row_rect(i); local known=is_known_skill(id)
         panel(x,y,rw,rh, known and {s.color[1]*0.16,s.color[2]*0.16,s.color[3]*0.18,0.95} or {0.11,0.12,0.17,0.95}, known and s.color or UI.line, 8*sw)
         if known then setc(s.color); rrect("fill", x, y+sy(4), sx(3), rh-sy(8), 2*sw) end   -- 已学：左侧彩色竖条
-        draw_skill_icon(s, x+sx(22), y+rh/2, sx(12))
+        -- 技能像素图标槽(硬边方格 + 技能色边)
+        local isz=sx(16); draw.slot(x+sx(14)-isz, y+rh/2-isz, isz*2, known and s.color or UI.line, known)
+        draw_skill_icon(s, x+sx(14), y+rh/2, sx(11))
         setc(UI.text); love.graphics.setFont(draw.font); love.graphics.print(s.name, x+sx(44), y+sy(6))
         setc(UI.dim); love.graphics.setFont(draw.font_sm); love.graphics.print(skill_desc(s), x+sx(44), y+sy(28))
         if known then

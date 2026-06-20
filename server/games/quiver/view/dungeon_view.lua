@@ -142,16 +142,17 @@ function dungeon_view.draw()
                 local tb=TIER_BAND[dg.tier]
                 panel(px+sx(12), yy, pw-sx(24), e.h, can and {0.13,0.16,0.22,0.97} or {0.11,0.12,0.17,0.95}, can and UI.btn or UI.line, 8*screen.sw)
                 setc(tb.color); rrect("fill", px+sx(12), yy, sx(4), e.h, 2*screen.sw)
-                love.graphics.setFont(draw.font); setc(unlocked and UI.text or UI.dim); love.graphics.print(dg.name, px+sx(24), yy+sy(6))
+                draw.pixel_icon("combat", px+sx(28), yy+sy(14), sx(8), unlocked and tb.color or UI.dim)
+                love.graphics.setFont(draw.font); setc(unlocked and UI.text or UI.dim); love.graphics.print(dg.name, px+sx(42), yy+sy(6))
                 love.graphics.setFont(draw.font_sm); setc(UI.dim)
-                love.graphics.print("推荐 Lv"..dg.min_lvl.."   "..dg.waves.."波 + BOSS", px+sx(24), yy+sy(26))
+                love.graphics.print("推荐 Lv"..dg.min_lvl.."   "..dg.waves.."波 + BOSS", px+sx(42), yy+sy(26))
                 -- 成本：许可 + 钥匙
                 local costtxt = "许可 "..dg.cost_energy
                 if dg.key then costtxt = costtxt .. "  + "..(MAT_NAME[dg.key] or dg.key).."x1" end
                 setc(can and UI.good or UI.bad); love.graphics.print(costtxt, px+sx(24), yy+sy(42))
                 -- 掉落预览：保底稀有度色点 + unique 标
                 local fl = dg.drops.rar_floor
-                setc(RAR[fl] and RAR[fl].color or UI.dim); love.graphics.circle("fill", px+sx(30), yy+sy(64), sx(5))
+                draw.gem(px+sx(30), yy+sy(64), sx(4), RAR[fl] and RAR[fl].color or UI.dim)
                 setc(UI.dim); love.graphics.setFont(draw.font_sm)
                 love.graphics.print("保底 "..(RAR[fl] and RAR[fl].name or fl).."+   唯一 "..math.floor((dg.drops.unique_chance or 0)*100).."%", px+sx(42), yy+sy(56))
                 -- 右侧状态/开打

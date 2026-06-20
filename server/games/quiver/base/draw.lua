@@ -67,6 +67,15 @@ end
 
 function draw.mat_chip(m, x, y, s) setc(MAT_COLOR[m]); rrect("fill",x-s,y-s,s*2,s*2,s*0.4); love.graphics.setColor(0,0,0,0.3); rrect("line",x-s,y-s,s*2,s*2,s*0.4) end
 
+-- 像素宝石/稀有度色块：硬边方块 + 左上 1px 高光 + 黑描边（替代抗锯齿圆点，保住像素观感）。
+-- (cx,cy)=中心，s=半边长。col=稀有度色。整数对齐。
+function draw.gem(cx, cy, s, col)
+    local x=math.floor(cx-s+0.5); local y=math.floor(cy-s+0.5); local w=math.max(2,math.floor(s*2+0.5)); local d=px(1)
+    setc(col); love.graphics.rectangle("fill",x,y,w,w)
+    love.graphics.setColor(1,1,1,0.45); love.graphics.rectangle("fill",x+d,y+d,math.max(d,w*0.4),d)  -- 左上高光
+    love.graphics.setColor(0,0,0,0.4); love.graphics.setLineWidth(d); love.graphics.rectangle("line",x,y,w,w); love.graphics.setLineWidth(1)
+end
+
 -- 像素物品槽：硬边方格 + 内陷斜面(左上暗/右下亮 1px) + 实色描边。
 -- 空槽用深底+灰边；有物品时底色取 border 的极暗版、边用 border(稀有度色)。
 -- pip>0 时在右上角画 pip 个 1px 稀有度方块(稀有度档位指示，史诗/传说一眼可辨)。

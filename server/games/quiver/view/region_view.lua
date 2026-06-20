@@ -78,10 +78,11 @@ function region_view.draw()
                 local lowlvl = state.player.level < rg.lo
                 panel(px+sx(12), yy, pw-sx(24), e.h, cur and {0.15,0.2,0.3,0.97} or {0.11,0.12,0.17,0.95}, cur and UI.btn or UI.line, 8*sw)
                 setc(tb.color); rrect("fill", px+sx(12), yy, sx(4), e.h, 2*sw)   -- 档位色条
-                love.graphics.setFont(draw.font); setc(lowlvl and UI.dim or UI.text); love.graphics.print(rg.name, px+sx(24), yy+sy(7))
-                love.graphics.setFont(draw.font_sm); setc(UI.dim); love.graphics.print("敌人 Lv "..rg.lo.."-"..rg.hi.."   装等 "..rg.ilo.."-"..rg.ihi, px+sx(24), yy+sy(28))
-                local seen={}; local dx=px+sx(24)
-                for _,rid in ipairs(rg.rar) do if not seen[rid] then seen[rid]=true; setc(RAR[rid].color); love.graphics.circle("fill",dx+sx(6),yy+sy(48),sx(5)); dx=dx+sx(16) end end
+                draw.pixel_icon("region", px+sx(28), yy+sy(15), sx(8), tb.color)   -- 像素旗帜(档位色)
+                love.graphics.setFont(draw.font); setc(lowlvl and UI.dim or UI.text); love.graphics.print(rg.name, px+sx(42), yy+sy(7))
+                love.graphics.setFont(draw.font_sm); setc(UI.dim); love.graphics.print("敌人 Lv "..rg.lo.."-"..rg.hi.."   装等 "..rg.ilo.."-"..rg.ihi, px+sx(42), yy+sy(28))
+                local seen={}; local dx=px+sx(42)
+                for _,rid in ipairs(rg.rar) do if not seen[rid] then seen[rid]=true; draw.gem(dx+sx(6),yy+sy(48),sx(4),RAR[rid].color); dx=dx+sx(16) end end
                 -- 推荐度：区间内绿勾 / 偏低红"偏难" / 远高灰"已轻松"
                 local rtxt, rcol
                 if cur then rtxt, rcol = "当前", UI.good
