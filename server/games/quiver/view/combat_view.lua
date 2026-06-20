@@ -1,81 +1,148 @@
 -- ============================================================================
--- view/combat_view —— 战斗场景：弓手 + 敌人(入场/死亡过程) + 抛射物 + 玩家三条(HP/MP/ATB) + 技能栏。
--- 纯绘制(immediate-mode)，无命中：战斗交互全自动，场景无可点元素。
--- 依赖：base/screen + base/draw + core/state + fx + sys/combat(buff_active) + data。
+-- view/combat_view —— 战斗场景（像素世界）：暮色天空/地面/远景 + 主角骨骼火柴人
+--   + 敌人像素精灵(入场/死亡过程) + 抛射物，全部画进低分场景画布(240x400)再最近邻放大。
+-- HUD(玩家 HP/MP/ATB 三条 + 技能槽)留在设计空间(480x800)叠在上层，换像素皮(扁平+硬边)。
+-- 纯绘制(immediate-mode)，无命中：战斗交互全自动，场景无可点元素。逻辑(ATB/技能/元素/抗性)不变。
+-- 依赖：base/screen + base/draw + view/sprites + core/state + fx + sys/combat + data。
 -- ============================================================================
 local screen = require("base.screen")
 local draw = require("base.draw")
+local sprites = require("view.sprites")
 local state = require("core.state")
 local fx = require("fx")
 local combat = require("sys.combat")
 local D = require("data")
 local UI = D.UI
+local P = D.PIX
 local SKILLS = D.SKILLS
-local DESIGN_H = D.DESIGN_H
+local DESIGN_W, DESIGN_H = D.DESIGN_W, D.DESIGN_H
 local ENTER_TIME, DEATH_TIME = D.ENTER_TIME, D.DEATH_TIME
 
 local function sx(v) return v*screen.sw end
 local function sy(v) return v*screen.sh end
 local setc = draw.setc
 local panel, bar, ring, rrect = draw.panel, draw.bar, draw.ring, draw.rrect
-local draw_archer, draw_skill_icon = draw.draw_archer, draw.draw_skill_icon
+local draw_skill_icon = draw.draw_skill_icon
 local buff_active = combat.buff_active
+local to_sx, to_sy = screen.to_scene_x, screen.to_scene_y
+
+local function C(c,a) love.graphics.setColor(c[1],c[2],c[3],a or 1) end
+local function lerp(a,b,t) return {a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t,a[3]+(b[3]-a[3])*t} end
 
 local combat_view = {}
 
+-- 敌人 → 精灵名（按 arch_id 精确，退家族，再退 slime）。纯查表，不碰战斗逻辑。
+local function enemy_sprite(e)
+    return (e.arch_id and D.ENEMY_SPRITE[e.arch_id])
+        or (e.family and D.ENEMY_SPRITE_FAMILY[e.family])
+        or "slime"
+end
+
+-- ── 暮色像素背景（画在场景画布像素坐标）：3 段天空 + 暖地平线 + 月 + 远山 + 地面 + 小径 ──
+local SW, SH = screen.SCENE_W, screen.SCENE_H
+local HOR = math.floor(SH*0.56)   -- 地平线
+local function draw_backdrop()
+    for yy=0,HOR-1 do local t=yy/HOR; local col
+        if t<0.6 then col=lerp(P.sky_top,P.sky_mid,t/0.6) else col=lerp(P.sky_mid,P.sky_hor,(t-0.6)/0.4) end
+        C(col); love.graphics.rectangle("fill",0,yy,SW,1) end
+    C(P.warm,0.5); love.graphics.rectangle("fill",0,HOR-10,SW,10)
+    -- 月 + 辉 + 弯月 + 星
+    C(P.moon,0.10); love.graphics.circle("fill",SW-40,46,22)
+    C(P.moon); love.graphics.circle("fill",SW-40,46,13); C(P.sky_mid); love.graphics.circle("fill",SW-46,42,12)
+    C({1,1,1},0.8); for _,s in ipairs({{30,42},{63,27},{105,60},{SW-15,82},{45,105},{144,33},{90,132}}) do love.graphics.rectangle("fill",s[1],s[2],1,1) end
+    -- 远山
+    C(P.hill_far); love.graphics.ellipse("fill",54,HOR+24,108,46); love.graphics.ellipse("fill",SW-30,HOR+27,96,40)
+    C(P.hill_mid); love.graphics.ellipse("fill",SW/2,HOR+36,144,36)
+    -- 地面
+    C(P.grass); love.graphics.rectangle("fill",0,HOR,SW,SH-HOR)
+    C(P.grass_hi); love.graphics.rectangle("fill",0,HOR,SW,3)
+    -- 小径（向地平线收窄）
+    C(P.dirt); love.graphics.polygon("fill", 90,HOR, 114,HOR, 144,SH, 60,SH)
+    C(P.dirt_hi); love.graphics.polygon("fill", 96,HOR, 105,HOR, 111,SH, 87,SH)
+    -- 草丛 + 树（深度分层：远小冷 → 近大）
+    for _,g in ipairs({{18,HOR+16},{45,HOR+46},{180,HOR+22},{SW-12,HOR+60},{150,HOR+76}}) do
+        C(P.grass_dk); love.graphics.rectangle("fill",g[1],g[2],2,1); C(P.grass_hi); love.graphics.rectangle("fill",g[1],g[2]-1,1,1) end
+    sprites.draw_tree(30,HOR+20,18); sprites.draw_tree(SW-22,HOR+28,22)
+    sprites.draw_tree(18,HOR+110,38)
+    sprites.draw_bush(78,HOR+86,6); sprites.draw_rock(150,HOR+150,7)
+    -- 萤火
+    C(P.fly,0.9); for _,p in ipairs({{108,HOR+60},{150,HOR+45},{78,HOR+92},{192,HOR+66}}) do love.graphics.rectangle("fill",p[1],p[2],1,1) end
+end
+
 function combat_view.draw()
-    local sw, sh = screen.sw, screen.sh
-    local px,py = sx(70), DESIGN_H*0.42*sh
-    draw_archer(px,py,"bow")
+    -- ── 像素世界：场景画布 ──
+    screen.begin_scene()
+    draw_backdrop()
+    -- 主角站在小径左侧、地面线上
+    local hx = math.floor(SW*0.24); local gy = HOR + math.floor((SH-HOR)*0.45)
+    sprites.draw_hero(hx, gy, draw.t, "bow")
+    -- 敌人像素精灵（design x → 场景 x；y 与主角同地面线）
     if state.enemy then
-        local ex,ey = state.enemy.x*sw, py; local alpha,scl=1,1
+        local ex = to_sx(state.enemy.x); local ey = gy
+        local alpha,scl = 1,1
         if state.enemy.phase=="dying" then local k=math.min(1,state.enemy.phase_t/DEATH_TIME); alpha=1-k; scl=1+k*0.4
         elseif state.enemy.phase=="enter" then alpha=math.min(1,state.enemy.phase_t/(ENTER_TIME*0.5)) end
-        local r=sx(30)*(1+state.enemy.hurt*0.3)*scl
-        if state.enemy.flash>0 then love.graphics.setColor(1,1,1,alpha) else setc(state.enemy.color,alpha) end
-        love.graphics.circle("fill",ex,ey-r*0.4,r); love.graphics.setColor(0.1,0.1,0.12,alpha)
-        love.graphics.circle("fill",ex-r*0.32,ey-r*0.5,r*0.13); love.graphics.circle("fill",ex+r*0.32,ey-r*0.5,r*0.13)
-        -- 精英/稀有光环：金/紫描边，一眼看出是硬货
-        if state.enemy.rank=="elite" or state.enemy.rank=="rare" then
-            local hc = (state.enemy.rank=="rare") and {0.78,0.5,1.0} or UI.gold
-            love.graphics.setColor(hc[1],hc[2],hc[3], alpha*(0.55+0.25*math.sin(fx.t_accum*5)))
-            love.graphics.setLineWidth(math.max(2,sx(2.5))); love.graphics.circle("line",ex,ey-r*0.4,r+sx(5)); love.graphics.setLineWidth(1)
+        local hurt = state.enemy.hurt or 0
+        local pscale = math.max(2, math.floor(5*scl + hurt*1.5))
+        love.graphics.setColor(1,1,1,alpha)
+        if state.enemy.flash and state.enemy.flash>0 then
+            -- 受击白闪：用白色覆盖整精灵（画一遍纯白方块近似）
+            local nm = enemy_sprite(state.enemy); local m = sprites.M[nm] or sprites.M.slime
+            local w=#m.rows[1]*pscale; local h=#m.rows*pscale
+            love.graphics.setColor(1,1,1,alpha)
+            love.graphics.rectangle("fill", math.floor(ex-w/2), math.floor(ey-h*0.85), w, h)
+        else
+            love.graphics.setColor(1,1,1,alpha)
+            sprites.draw_monster(enemy_sprite(state.enemy), ex, ey-pscale*5, pscale, true)
         end
-        if state.enemy.phase=="fight" then
-            bar(ex-sx(60),ey+sy(18),sx(120),sy(11),state.enemy.hp/state.enemy.max_hp,UI.bad,math.floor(state.enemy.hp))
-            bar(ex-sx(60),ey+sy(32),sx(120),sy(5),state.enemy.atb,{0.9,0.7,0.3})
-            -- 敌人名+等级（精英/稀有名字已带前缀）
-            setc(state.enemy.rank=="rare" and {0.78,0.5,1.0} or state.enemy.rank=="elite" and UI.gold or UI.dim)
-            love.graphics.setFont(draw.font_sm); love.graphics.printf(state.enemy.name.." Lv"..state.enemy.level, ex-sx(60), ey-r-sy(18), sx(120), "center")
+        -- 精英/稀有光环
+        if state.enemy.rank=="elite" or state.enemy.rank=="rare" then
+            local hc = (state.enemy.rank=="rare") and {0.78,0.5,1.0} or P.acc
+            love.graphics.setColor(hc[1],hc[2],hc[3], alpha*(0.55+0.25*math.sin(fx.t_accum*5)))
+            love.graphics.setLineWidth(1); love.graphics.circle("line",ex,ey-pscale*5,pscale*7)
         end
     end
+    -- 抛射物（p.x/p.y 是设计坐标 480x800 → 场景坐标 240x400）
     for _,p in ipairs(state.projectiles) do
-        setc(p.crit and UI.gold or p.color); love.graphics.setLineWidth(math.max(2,sx(2.5)))
-        local hx,hy = p.x*sw, p.y*sh
+        C(p.crit and UI.gold or p.color); love.graphics.setLineWidth(2)
+        local hx2,hy2 = to_sx(p.x), to_sy(p.y)
         local ca,sa = math.cos(p.ang or 0), math.sin(p.ang or 0)
-        love.graphics.line(hx-ca*sx(14), hy-sa*sx(14), hx, hy)
-        love.graphics.polygon("fill", hx,hy, hx-ca*sx(6)-sa*sx(3), hy-sa*sx(6)+ca*sx(3), hx-ca*sx(6)+sa*sx(3), hy-sa*sx(6)-ca*sx(3))
+        love.graphics.line(hx2-ca*7, hy2-sa*7, hx2, hy2)
+        love.graphics.polygon("fill", hx2,hy2, hx2-ca*3-sa*1.5, hy2-sa*3+ca*1.5, hx2-ca*3+sa*1.5, hy2-sa*3-ca*1.5)
         love.graphics.setLineWidth(1)
     end
-    -- 玩家：增益生效时 atb 条染色提示
+    screen.end_scene()
+
+    -- ── HUD（设计空间 480x800，像素扁平皮）──
+    -- 敌人血条/名字浮在敌人头顶（用屏幕坐标，对齐场景里的敌人）
+    local px,py = sx(70), DESIGN_H*0.42*screen.sh
+    if state.enemy and state.enemy.phase=="fight" then
+        local ex = state.enemy.x*screen.sw; local ey = py
+        bar(ex-sx(60),ey-sy(60),sx(120),sy(11),state.enemy.hp/state.enemy.max_hp,UI.bad,math.floor(state.enemy.hp))
+        bar(ex-sx(60),ey-sy(47),sx(120),sy(5),state.enemy.atb,{0.9,0.7,0.3})
+        setc(state.enemy.rank=="rare" and {0.78,0.5,1.0} or state.enemy.rank=="elite" and UI.gold or UI.text)
+        love.graphics.setFont(draw.font_sm); love.graphics.printf(state.enemy.name.." Lv"..state.enemy.level, ex-sx(70), ey-sy(76), sx(140), "center")
+    end
+    -- 玩家三条（锚在主角脚下：场景里主角约 design x≈115 / y≈600）
     local atbcol = buff_active("haste") and {0.4,0.95,0.95} or {0.4,0.7,1.0}
-    bar(px-sx(38),py+sy(30),sx(100),sy(11),state.player.hp/state.player.max_hp,UI.good,math.floor(state.player.hp).."/"..state.player.max_hp)
-    bar(px-sx(38),py+sy(43),sx(100),sy(8),(state.player.mp or 0)/(state.player.max_mp or 1),{0.35,0.55,0.95},"MP "..math.floor(state.player.mp or 0))
-    bar(px-sx(38),py+sy(54),sx(100),sy(4),state.player.atb,atbcol)
-    -- 技能栏：横排已学技能 + 冷却回充环 + 释放白闪（看得见技能在放）
+    local bx = sx(60); local by = sy(640)
+    bar(bx,by,sx(110),sy(12),state.player.hp/state.player.max_hp,UI.good,math.floor(state.player.hp).."/"..state.player.max_hp)
+    bar(bx,by+sy(14),sx(110),sy(9),(state.player.mp or 0)/(state.player.max_mp or 1),{0.35,0.55,0.95},"MP "..math.floor(state.player.mp or 0))
+    bar(bx,by+sy(25),sx(110),sy(5),state.player.atb,atbcol)
+    -- 技能栏：横排已学技能 + 冷却环 + 释放白闪
     local n=#state.player.skills; local sz=sx(16); local gap=sx(10); local total=n*(sz*2)+(n-1)*gap
-    local sx0=(love.graphics.getWidth()-total)/2; local sy0=py+sy(72)
+    local sx0=(love.graphics.getWidth()-total)/2; local sy0=sy(700)
     for i,id in ipairs(state.player.skills) do
         local s=SKILLS[id]; local cxc=sx0+(i-1)*(sz*2+gap)+sz; local cyc=sy0
         local flash=state.player.cast_flash[id] or 0; local fs=1+(flash>0 and 0.15 or 0)
-        panel(cxc-sz, cyc-sz, sz*2, sz*2, {s.color[1]*0.16,s.color[2]*0.16,s.color[3]*0.18,0.95}, s.color, 6*sw)
+        panel(cxc-sz, cyc-sz, sz*2, sz*2, {s.color[1]*0.16,s.color[2]*0.16,s.color[3]*0.18,0.95}, s.color)
         draw_skill_icon(s, cxc, cyc, sz*0.7*fs)
         local cd=state.player.cd[id]
         if cd and s.cd>0 then
-            love.graphics.setColor(0,0,0,0.55); rrect("fill",cxc-sz,cyc-sz,sz*2,sz*2,6*sw)
+            love.graphics.setColor(0,0,0,0.55); rrect("fill",cxc-sz,cyc-sz,sz*2,sz*2)
             ring(cxc, cyc, sz*0.8, 1-cd/s.cd, s.color)
         end
-        if flash>0 then love.graphics.setColor(1,1,1,flash*1.6); rrect("line",cxc-sz,cyc-sz,sz*2,sz*2,6*sw) end
+        if flash>0 then love.graphics.setColor(1,1,1,flash*1.6); rrect("line",cxc-sz,cyc-sz,sz*2,sz*2) end
     end
 end
 

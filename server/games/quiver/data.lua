@@ -516,6 +516,23 @@ end
 --   armor_mul：family 级护甲倍率(construct 高甲 ×1.3，逼穿甲/弩)。
 --   drops：family 偏向掉落(本期登记，combat.drop_loot 取部分接上)。
 -- ============================================================================
+-- 怪物像素精灵映射：arch_id/family → view/sprites 里的精灵名（可用：slime/bat/boar/wolf/
+-- ghost/golem/ogre/dragon/skeleton/beetle）。对不上的临时用 slime 占位(P1 补全)。
+D.ENEMY_SPRITE = {
+    boar="boar", wolf="wolf", icewolf="wolf", bandit="ogre", ogre="ogre",
+    wraith="ghost", lich="skeleton", revenant="skeleton",
+    golem="golem", gargoyle="golem",
+    bug="beetle", bat="bat",
+    lava="slime", frost="slime", voidcat="bat", drake="dragon",
+    alpha_wolf="wolf", bog_horror="ghost", stone_lord="golem",
+    frost_queen="ghost", lava_tyrant="dragon", void_warden="ghost", throne_king="dragon",
+}
+-- 家族兜底（arch_id 未列时按 family 选）
+D.ENEMY_SPRITE_FAMILY = {
+    beast="wolf", humanoid="ogre", undead="skeleton", construct="golem",
+    elemental="slime", dragon="dragon", void="bat",
+}
+
 D.ENEMY_FAMILY = {
     beast    = { name="野兽",   resist={fire=1.1,  poison=0.9},            armor_mul=1.0, drops={feather=0.30, oil=0.15, hide=0.20} },
     humanoid = { name="人形",   resist={},                                 armor_mul=1.0, drops={hide=0.25, oil=0.10} },
@@ -621,10 +638,35 @@ D.DUNGEONS = {
 D.DUNGEON = {}; for _,dg in ipairs(D.DUNGEONS) do D.DUNGEON[dg.id]=dg end
 -- 副本分组展示顺序(沿用 TIER_ORDER：low/mid/high)
 
+-- ── 像素风「暮色猎人」调色（与 _pixel_ref/scene_hero_ref.lua 同一套暮色色域）──
+-- 扁平硬边：实色填充 + 1px 硬描边 + 一条简单高光，无圆角/阴影/渐变/抗锯齿。
+-- UI 直接走这套色；base/draw 把 panel/button/bar 重绘为像素扁平件。
 D.UI = {
-    bg={0.07,0.08,0.12}, panel={0.12,0.13,0.19,0.97}, line={0.26,0.28,0.36},
-    text={0.93,0.94,0.97}, dim={0.55,0.57,0.64}, good={0.4,0.85,0.5}, bad={0.88,0.3,0.3},
-    gold={1.0,0.84,0.25}, xp={0.45,0.6,1.0}, btn={0.25,0.55,1.0},
+    bg={0.09,0.08,0.18},                       -- 暮色夜空底（sky_top）
+    panel={0.13,0.12,0.22,0.97},               -- 面板实色（深暮蓝）
+    panel_lo={0.10,0.09,0.17,0.97},            -- 面板暗格/凹槽
+    line={0.34,0.27,0.42},                      -- 1px 硬描边（暮色地平线紫）
+    line_hi={0.50,0.42,0.58},                   -- 高光描边
+    text={0.94,0.92,0.86},                      -- 暖白文字（moon 色）
+    dim={0.62,0.58,0.70},                       -- 次要文字（冷暮灰紫）
+    good={0.40,0.78,0.46},                      -- 生命/正向（grassHi）
+    bad={0.86,0.32,0.30},                       -- 伤害/负向（暖红）
+    gold={0.96,0.75,0.34},                      -- 强调金（acc 琥珀金）
+    xp={0.45,0.50,0.85},                        -- 经验蓝紫
+    btn={0.31,0.42,0.58},                       -- 按钮（暮色钢蓝）
+}
+-- 场景画布像素调色（供 view/sprites + combat_view 画低分场景）。复用 ref 暮色色名。
+D.PIX = {
+    sky_top={0.09,0.08,0.18}, sky_mid={0.17,0.15,0.31}, sky_hor={0.34,0.27,0.42}, warm={0.55,0.36,0.44},
+    moon={0.94,0.91,0.80},
+    hill_far={0.21,0.21,0.35}, hill_mid={0.15,0.23,0.31},
+    grass={0.25,0.44,0.33}, grass_hi={0.35,0.57,0.40}, grass_dk={0.17,0.33,0.26},
+    dirt={0.44,0.33,0.23}, dirt_hi={0.55,0.43,0.30},
+    fol={0.23,0.50,0.34}, fol_hi={0.37,0.65,0.45}, fol_dk={0.14,0.33,0.24},
+    trunk={0.41,0.28,0.18}, trunk_dk={0.27,0.18,0.11},
+    fire1={0.99,0.80,0.38}, fire2={0.97,0.52,0.21},
+    acc={0.96,0.75,0.34}, fly={0.87,0.93,0.62},
+    outl={0.11,0.09,0.12}, skin={0.93,0.74,0.52}, hood={0.28,0.50,0.36}, hood_hi={0.38,0.64,0.46},
 }
 
 return D

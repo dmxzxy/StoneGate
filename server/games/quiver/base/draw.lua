@@ -28,26 +28,40 @@ draw.t = 0
 function draw.setc(c,a) love.graphics.setColor(c[1],c[2],c[3],a or c[4] or 1) end
 local setc = draw.setc
 
-function draw.rrect(m,x,y,w,h,r) love.graphics.rectangle(m,x,y,w,h,r or 6*screen.sw,r or 6*screen.sw) end
+-- 像素扁平：硬直角矩形（忽略圆角参数 r —— 保住硬边像素观感）。签名保持不变，调用方无需改。
+function draw.rrect(m,x,y,w,h,r) love.graphics.rectangle(m,x,y,w,h) end
 local rrect = draw.rrect
 
+-- 1px(随缩放最少 1px)硬描边的整数线宽
+local function px(v) return math.max(1, math.floor(v*screen.sw+0.5)) end
+
+-- 面板：实色填充 + 1px 硬描边 + 顶部一条简单高光带（无圆角/阴影/渐变）
 function draw.panel(x,y,w,h,fill,border,r)
-    setc(fill or UI.panel); rrect("fill",x,y,w,h,r or 8*screen.sw)
-    love.graphics.setColor(1,1,1,0.04); rrect("fill",x,y,w,h*0.42,r or 8*screen.sw)
-    if border then setc(border); love.graphics.setLineWidth(math.max(1,1.3*screen.sw)); rrect("line",x,y,w,h,r or 8*screen.sw); love.graphics.setLineWidth(1) end
+    setc(fill or UI.panel); love.graphics.rectangle("fill",x,y,w,h)
+    love.graphics.setColor(1,1,1,0.05); love.graphics.rectangle("fill",x+px(1),y+px(1),w-px(2),px(2))  -- 顶高光条
+    setc(border or UI.line); love.graphics.setLineWidth(px(1)); love.graphics.rectangle("line",x,y,w,h); love.graphics.setLineWidth(1)
 end
 local panel = draw.panel
 
+-- 按钮：实色填充 + 顶高光条 + 底暗边 + 1px 硬描边
 function draw.button(x,y,w,h,label,col,enabled,fnt)
     col=col or UI.btn; if enabled==false then col={col[1]*0.35,col[2]*0.35,col[3]*0.4} end
-    setc(col); rrect("fill",x,y,w,h,6*screen.sw); love.graphics.setColor(1,1,1,0.16); rrect("fill",x+6*screen.sw,y+1.5*screen.sh,w-12*screen.sw,h*0.34)
-    love.graphics.setColor(0,0,0,0.22); rrect("fill",x,y+h-3*screen.sh,w,3*screen.sh,6*screen.sw)
+    setc(col); love.graphics.rectangle("fill",x,y,w,h)
+    love.graphics.setColor(1,1,1,0.16); love.graphics.rectangle("fill",x+px(1),y+px(1),w-px(2),px(2))      -- 顶高光
+    love.graphics.setColor(0,0,0,0.28); love.graphics.rectangle("fill",x+px(1),y+h-px(2),w-px(2),px(2))     -- 底暗边
+    setc({col[1]*1.4,col[2]*1.4,col[3]*1.4}); love.graphics.setLineWidth(px(1)); love.graphics.rectangle("line",x,y,w,h); love.graphics.setLineWidth(1)
     fnt=fnt or draw.font; love.graphics.setFont(fnt); setc(enabled==false and UI.dim or UI.text); love.graphics.printf(label,x,y+(h-fnt:getHeight())/2,w,"center")
 end
 
+-- 进度条：黑槽 + 实色填充 + 顶高光条 + 1px 硬描边（无圆头/渐变）
 function draw.bar(x,y,w,h,frac,col,label)
-    frac=math.max(0,math.min(1,frac)); love.graphics.setColor(0,0,0,0.5); rrect("fill",x,y,w,h,h/2)
-    if frac>0 then setc(col); rrect("fill",x,y,math.max(h,w*frac),h,h/2); love.graphics.setColor(1,1,1,0.2); rrect("fill",x+h/2,y+1.5*screen.sh,math.max(0,w*frac-h),h*0.3,h*0.2) end
+    frac=math.max(0,math.min(1,frac))
+    love.graphics.setColor(0,0,0,0.6); love.graphics.rectangle("fill",x,y,w,h)
+    if frac>0 then
+        local fw=math.max(px(1),w*frac); setc(col); love.graphics.rectangle("fill",x,y,fw,h)
+        love.graphics.setColor(1,1,1,0.22); love.graphics.rectangle("fill",x,y+px(1),fw,px(1))
+    end
+    setc(UI.line); love.graphics.setLineWidth(px(1)); love.graphics.rectangle("line",x,y,w,h); love.graphics.setLineWidth(1)
     if label then love.graphics.setFont(draw.font_sm); love.graphics.setColor(1,1,1,0.95); love.graphics.printf(label,x,y+(h-draw.font_sm:getHeight())/2,w,"center") end
 end
 
