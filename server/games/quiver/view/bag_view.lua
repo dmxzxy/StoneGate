@@ -23,7 +23,7 @@ local setc = draw.setc
 local panel, rrect = draw.panel, draw.rrect
 local icon_arrow = draw.icon_arrow
 local inv_swap, ammo_swap = inv.inv_swap, inv.ammo_swap
-local item_color, draw_item_icon = items.item_color, items.draw_item_icon
+local item_color, draw_item_icon, item_pip = items.item_color, items.draw_item_icon, items.item_pip
 
 local BAG_COLS = 6
 
@@ -113,8 +113,7 @@ function bag_view.draw()
         local x=ax+(i-1)*(acell+agap)
         local it=state.player.ammo[i]
         local bc = it and item_color(it) or {0.3,0.31,0.4}
-        if it then panel(x,ay,acell,acell,{bc[1]*0.16,bc[2]*0.16,bc[3]*0.18,0.95},bc,6*sw)
-        else panel(x,ay,acell,acell,{0.1,0.11,0.15,0.9},{0.22,0.23,0.3},6*sw) end
+        draw.slot(x,ay,acell,bc, it~=nil, 0)
         if it and not (state.drag and state.drag.moved and state.drag.from=="ammo" and state.drag.slot==i) then
             love.graphics.push("all"); if dim_ammo then love.graphics.setColor(1,1,1,0.4) end
             icon_arrow(x+acell/2, ay+acell/2-sy(2), acell*0.3, D.arrow_color(it))
@@ -130,8 +129,7 @@ function bag_view.draw()
         local x,y=bag_cell_rect(i,gx,gy,cell,gap)
         local it=state.player.inv[i]
         local border = it and item_color(it) or {0.22,0.23,0.3}
-        if it then panel(x,y,cell,cell,{border[1]*0.16,border[2]*0.16,border[3]*0.18,0.95},border,6*sw)
-        else panel(x,y,cell,cell,{0.1,0.11,0.15,0.9},{0.2,0.21,0.27},6*sw) end
+        draw.slot(x,y,cell,border, it~=nil, it and item_pip(it) or 0)
         if it and not (state.drag and state.drag.moved and state.drag.from=="bag" and state.drag.slot==i) then
             local dim = item_dim(it.kind)
             love.graphics.push("all"); if dim then love.graphics.setColor(1,1,1,0.4) end
@@ -151,7 +149,8 @@ function bag_view.draw_drag()
     local it=state.drag.item
     local norm = it
     local c=item_color(norm)
-    setc(c,0.85); rrect("fill", state.drag.x-cell/2, state.drag.y-cell/2, cell, cell, 6*sw)
+    setc(c,0.18); love.graphics.rectangle("fill", state.drag.x-cell/2, state.drag.y-cell/2, cell, cell)
+    setc(c,0.95); love.graphics.setLineWidth(math.max(1,sw)); love.graphics.rectangle("line", state.drag.x-cell/2, state.drag.y-cell/2, cell, cell); love.graphics.setLineWidth(1)
     draw_item_icon(norm, state.drag.x, state.drag.y-sy(2), cell*0.3)
     if it.qty>1 then setc(UI.text); love.graphics.setFont(draw.font_sm); love.graphics.printf(it.qty, state.drag.x-cell/2, state.drag.y+cell/2-sy(16), cell-sx(4), "right") end
 end

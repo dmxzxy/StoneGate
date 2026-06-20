@@ -23,6 +23,15 @@ function items.item_color(it)
     else return MAT_COLOR[it.id] or UI.dim end
 end
 
+-- 稀有度档位 pip 数：装备按稀有度 tier-2(精良起才有角标，史诗2/传说3…)，其余 0。
+-- 给像素槽右上角标用——一眼区分高稀有度装备，无需读字。
+function items.item_pip(it)
+    if it.kind=="gear" and it.gear then
+        local r=D.RAR[it.gear.rarity]; if r then return math.max(0, r.tier-3) end
+    end
+    return 0
+end
+
 function items.draw_item_icon(it, cx, cy, s)
     if it.kind=="mat" then icon_mat(it.id, cx, cy, s)
     elseif it.kind=="arrow" then icon_arrow(cx, cy, s, D.arrow_color(it))

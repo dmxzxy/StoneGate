@@ -67,6 +67,28 @@ end
 
 function draw.mat_chip(m, x, y, s) setc(MAT_COLOR[m]); rrect("fill",x-s,y-s,s*2,s*2,s*0.4); love.graphics.setColor(0,0,0,0.3); rrect("line",x-s,y-s,s*2,s*2,s*0.4) end
 
+-- 像素物品槽：硬边方格 + 内陷斜面(左上暗/右下亮 1px) + 实色描边。
+-- 空槽用深底+灰边；有物品时底色取 border 的极暗版、边用 border(稀有度色)。
+-- pip>0 时在右上角画 pip 个 1px 稀有度方块(稀有度档位指示，史诗/传说一眼可辨)。
+-- 整数对齐 + px(1) 描边，保住硬边像素观感。坐标/尺寸不变（命中沿用调用方矩形）。
+function draw.slot(x,y,s,border,filled,pip)
+    x=math.floor(x+0.5); y=math.floor(y+0.5); s=math.floor(s+0.5)
+    local b = border or {0.24,0.25,0.32}
+    local fill = filled and {b[1]*0.16,b[2]*0.16,b[3]*0.18,0.96} or {0.08,0.09,0.13,0.94}
+    setc(fill); love.graphics.rectangle("fill",x,y,s,s)
+    -- 内陷斜面：上/左 一道暗线，下/右 一道亮线 → 凹槽手感
+    local d=px(1)
+    love.graphics.setColor(0,0,0,0.34); love.graphics.rectangle("fill",x+d,y+d,s-2*d,d); love.graphics.rectangle("fill",x+d,y+d,d,s-2*d)
+    love.graphics.setColor(1,1,1,filled and 0.12 or 0.05); love.graphics.rectangle("fill",x+d,y+s-2*d,s-2*d,d); love.graphics.rectangle("fill",x+s-2*d,y+d,d,s-2*d)
+    -- 硬边描边
+    setc(b); love.graphics.setLineWidth(d); love.graphics.rectangle("line",x,y,s,s); love.graphics.setLineWidth(1)
+    -- 稀有度角标 pip（右上连排小方块）
+    if pip and pip>0 then
+        local ps=math.max(2,px(3)); setc(b)
+        for i=1,pip do love.graphics.rectangle("fill", x+s-d-ps - (i-1)*(ps+px(1)), y+d, ps, ps) end
+    end
+end
+
 -- 面板标题栏右上角 X 关闭键（视觉）。命中矩形由调用方按同一坐标判定。
 -- px,py,pw 为面板左上+宽；返回该键矩形 x,y,w,h 供命中复用。
 function draw.close_x(px,py,pw)

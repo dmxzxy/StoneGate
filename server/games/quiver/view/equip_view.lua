@@ -19,8 +19,9 @@ local function sy(v) return v*screen.sh end
 local function hit(x,y,rx,ry,rw,rh) return x>=rx and x<=rx+rw and y>=ry and y<=ry+rh end
 local setc = draw.setc
 local panel, button = draw.panel, draw.button
-local icon_kind, draw_archer = draw.icon_kind, draw.draw_archer
+local icon_kind, draw_hero_chibi = draw.icon_kind, draw.draw_hero_chibi
 local gear_color = inv.gear_color
+local RAR = D.RAR
 
 local equip_view = {}
 
@@ -43,16 +44,16 @@ function equip_view.draw()
     love.graphics.setFont(draw.font_med); setc(UI.text); love.graphics.printf("装备",px,py+sy(8),pw,"center")
     draw.close_x(px,py,pw)
 
-    -- 中间角色火柴人
+    -- 中间角色：像素 chibi 骨骼弓手（复用 ref 的代码关节大头剪影）
     local _,fy0,cell = equip_cell_rect("feet")  -- 用左列最后一格的 y 作为脚部参考
-    draw_archer(px+pw/2, fy0+cell, "bow")
+    draw_hero_chibi(px+pw/2, fy0+cell, math.max(2, sx(3.4)))
 
     -- 槽位格子（左列防具 / 右列武器首饰）
     for _,slot in ipairs(SLOTS) do
         local x,y,c = equip_cell_rect(slot); local g=state.player.equip[slot]; local info=SLOT_INFO[slot]
         local rc = g and gear_color(g) or {0.3,0.31,0.38}
-        if g then panel(x,y,c,c,{rc[1]*0.16,rc[2]*0.16,rc[3]*0.18,0.95},rc,6*sw)
-        else panel(x,y,c,c,{0.1,0.11,0.15,0.92},{0.22,0.23,0.3},6*sw) end
+        local pip = (g and RAR[g.rarity]) and math.max(0, RAR[g.rarity].tier-3) or 0
+        draw.slot(x,y,c,rc, g~=nil, pip)
         if g then
             icon_kind(info.kind, x+c/2, y+c/2-sy(2), c*0.32, rc)
         else
