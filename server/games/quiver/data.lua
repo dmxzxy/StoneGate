@@ -223,6 +223,26 @@ for id,s in pairs(D.SECONDARY) do
     D.MAT_NAME[id]=s.name; D.MAT_COLOR[id]=s.color; D.MAT_DESC[id]=s.desc
 end
 
+-- ============================================================================
+-- 锭(§5 锻造)：矿→锭，stackable，造箭头/武器/护甲的中间材料。
+--   每锭绑一档兵刃矿(o_blade<otier>)为主料 + 薪炭木燃料；高档需更高 forge 等级。
+--   id=<金属>_ingot；color 由档调亮(承接矿石灰蓝基色)。tier 仅作展示/排序。
+-- ============================================================================
+D.INGOTS = {
+    { id="copper_ingot",  name="铜锭",   otier=2, tier=2, color={0.78,0.5,0.32} },
+    { id="iron_ingot",    name="铁锭",   otier=4, tier=4, color={0.72,0.74,0.8} },
+    { id="silver_ingot",  name="银锭",   otier=6, tier=6, color={0.85,0.88,0.95} },
+    { id="mithril_ingot", name="秘银锭", otier=6, tier=7, color={0.6,0.85,0.9} },
+    { id="adamant_ingot", name="精金锭", otier=7, tier=8, color={0.5,0.8,0.6} },
+    { id="starsteel_ingot",name="星钢锭",otier=7, tier=9, color={0.7,0.7,0.95} },
+    { id="voidiron_ingot",name="虚空铁锭",otier=8,tier=10,color={0.55,0.4,0.7} },
+}
+D.INGOT = {}; for _,ig in ipairs(D.INGOTS) do
+    D.INGOT[ig.id]=ig
+    D.MAT_NAME[ig.id]=ig.name; D.MAT_COLOR[ig.id]=ig.color
+    D.MAT_DESC[ig.id]="T"..ig.tier.." 锭。由矿石炼成，造箭头/武器/护甲。"
+end
+
 -- 按 cat+tier+system 取材料 id（配方/采集用）。无则 nil。
 function D.mat_id(cat, tier, system)
     local d = D.MAT[cat:sub(1,1).."_"..system..tier]
@@ -320,32 +340,69 @@ D.POT_COLOR = { hppot={0.9,0.35,0.4} }
 D.POT_DESC = { hppot="战斗中生命过低时自动饮用，回复部分生命。" }
 
 -- 统一制造图谱：制箭只是「造箭类图谱」，与中间材料/药剂共用同一套 can_craft/do_craft。
--- out.kind: arrow(进箭袋,成品箭三轴 head/element/feather) | mat(进背包) | potion(进背包)
+-- out.kind: arrow(进箭袋,成品箭三轴 head/element/feather) | mat(进背包) | potion(进背包) | gear(进背包,roll 稀有度)
 -- 制箭 out = {kind="arrow", head=, element=, feather=, qty=}；战斗按三轴查 D.AHEAD/AELEM/AFEAT。
--- req=所需制造职业等级；time=制作归一化耗时；learn=start(初始)|level(到级自动)|master(技能大师)
+-- req=所需职业等级；time=制作归一化耗时；learn=start(初始)|level(到级自动)|master(技能大师)
+-- job=该图谱吃哪个子职业的等级/经验：craft(制造,默认) | forge(锻造)。
+-- cat=制造页分类 tab：fletch(制箭) | mat(材料药剂) | ingot(炼锭) | armor(造甲) | bow(造弓)。
 D.ARROW_BATCH = 20
-D.CRAFT_BASE  = 0.20   -- 制作进度基准：速率 = CRAFT_BASE * craft.lvl / bp.time
+D.CRAFT_BASE  = 0.20   -- 制作进度基准：速率 = CRAFT_BASE * job.lvl / bp.time
 -- 制箭图谱按系取材：箭杆木(w_shaft)+箭簇矿(o_head) + 元素附材(精萃/油/毒囊/利刃石...) + 翎羽变体。
 -- 三轴自由组合数远大于单表 → 这里只铺“代表性常用箭”，玩家按 head/element/feather 区分。
 D.BLUEPRINTS = {
     -- ---- 物理箭(头档进阶，纯物理兜底) ----
-    { id="ar_flint",  name="燧石箭",  req=1, time=4, learn="start",  out={kind="arrow", head="flint",  element="phys", feather="plain", qty=D.ARROW_BATCH}, cost={ w_shaft1=3, feather=1 } },
-    { id="ar_iron",   name="铁簇箭",  req=2, time=5, learn="level",  out={kind="arrow", head="iron",   element="phys", feather="plain", qty=D.ARROW_BATCH}, cost={ w_shaft2=2, o_head4=3, feather=1 } },
-    { id="ar_steel",  name="钢簇箭",  req=5, time=6, learn="level",  out={kind="arrow", head="steel",  element="phys", feather="eagle", qty=D.ARROW_BATCH}, cost={ w_shaft3=2, o_head5=3, eaglefeat=1 } },
-    { id="ar_mithril",name="秘银箭",  req=8, time=7, learn="level",  out={kind="arrow", head="mithril",element="phys", feather="eagle", qty=D.ARROW_BATCH}, cost={ w_shaft4=2, o_head6=3, eaglefeat=2 } },
+    { id="ar_flint",  name="燧石箭", cat="fletch", req=1, time=4, learn="start",  out={kind="arrow", head="flint",  element="phys", feather="plain", qty=D.ARROW_BATCH}, cost={ w_shaft1=3, feather=1 } },
+    { id="ar_iron",   name="铁簇箭", cat="fletch", req=2, time=5, learn="level",  out={kind="arrow", head="iron",   element="phys", feather="plain", qty=D.ARROW_BATCH}, cost={ w_shaft2=2, o_head4=3, feather=1 } },
+    { id="ar_steel",  name="钢簇箭", cat="fletch", req=5, time=6, learn="level",  out={kind="arrow", head="steel",  element="phys", feather="eagle", qty=D.ARROW_BATCH}, cost={ w_shaft3=2, o_head5=3, eaglefeat=1 } },
+    { id="ar_mithril",name="秘银箭", cat="fletch", req=8, time=7, learn="level",  out={kind="arrow", head="mithril",element="phys", feather="eagle", qty=D.ARROW_BATCH}, cost={ w_shaft4=2, o_head6=3, eaglefeat=2 } },
     -- ---- 元素箭(代表性 build 箭) ----
-    { id="ar_fire",   name="火焰箭",  req=3, time=6, learn="level",  out={kind="arrow", head="bronze", element="fire",   feather="plain", qty=D.ARROW_BATCH}, cost={ w_shaft2=2, o_head3=2, oil=2, feather=1 } },
-    { id="ar_frost",  name="冰霜箭",  req=4, time=6, learn="level",  out={kind="arrow", head="iron",   element="frost",  feather="wind",  qty=D.ARROW_BATCH}, cost={ w_shaft2=2, o_head4=2, h_essence2=3, windfeat=1 } },
-    { id="ar_poison", name="剧毒箭",  req=4, time=6, learn="level",  out={kind="arrow", head="iron",   element="poison", feather="wind",  qty=D.ARROW_BATCH}, cost={ w_shaft2=2, o_head4=2, venomsac=2, windfeat=1 } },
-    { id="ar_bleed",  name="流血箭",  req=5, time=6, learn="level",  out={kind="arrow", head="steel",  element="bleed",  feather="wind",  qty=D.ARROW_BATCH}, cost={ w_shaft3=2, o_head5=2, bladestone=2, windfeat=1 } },
-    { id="ar_pierce", name="穿甲箭",  req=6, time=7, learn="master", out={kind="arrow", head="silver", element="pierce", feather="heavy", qty=D.ARROW_BATCH}, cost={ w_shaft4=3, o_head6=3, heavyfeat=2 } },
-    { id="ar_blast",  name="爆裂箭",  req=6, time=7, learn="master", out={kind="arrow", head="silver", element="blast",  feather="plain", qty=D.ARROW_BATCH}, cost={ w_shaft4=2, o_head6=2, oil=2, sulfur=2 } },
-    { id="ar_sunder", name="破甲箭",  req=7, time=7, learn="master", out={kind="arrow", head="mithril",element="sunder", feather="heavy", qty=D.ARROW_BATCH}, cost={ w_shaft5=2, o_head6=3, h_essence4=2, heavyfeat=2 } },
-    { id="ar_purify", name="净化箭",  req=8, time=8, learn="master", out={kind="arrow", head="adamant",element="purify", feather="plain", qty=D.ARROW_BATCH}, cost={ w_shaft6=2, o_head7=3, h_essence5=3, feather=2 } },
+    { id="ar_fire",   name="火焰箭", cat="fletch", req=3, time=6, learn="level",  out={kind="arrow", head="bronze", element="fire",   feather="plain", qty=D.ARROW_BATCH}, cost={ w_shaft2=2, o_head3=2, oil=2, feather=1 } },
+    { id="ar_frost",  name="冰霜箭", cat="fletch", req=4, time=6, learn="level",  out={kind="arrow", head="iron",   element="frost",  feather="wind",  qty=D.ARROW_BATCH}, cost={ w_shaft2=2, o_head4=2, h_essence2=3, windfeat=1 } },
+    { id="ar_poison", name="剧毒箭", cat="fletch", req=4, time=6, learn="level",  out={kind="arrow", head="iron",   element="poison", feather="wind",  qty=D.ARROW_BATCH}, cost={ w_shaft2=2, o_head4=2, venomsac=2, windfeat=1 } },
+    { id="ar_bleed",  name="流血箭", cat="fletch", req=5, time=6, learn="level",  out={kind="arrow", head="steel",  element="bleed",  feather="wind",  qty=D.ARROW_BATCH}, cost={ w_shaft3=2, o_head5=2, bladestone=2, windfeat=1 } },
+    { id="ar_pierce", name="穿甲箭", cat="fletch", req=6, time=7, learn="master", out={kind="arrow", head="silver", element="pierce", feather="heavy", qty=D.ARROW_BATCH}, cost={ w_shaft4=3, o_head6=3, heavyfeat=2 } },
+    { id="ar_blast",  name="爆裂箭", cat="fletch", req=6, time=7, learn="master", out={kind="arrow", head="silver", element="blast",  feather="plain", qty=D.ARROW_BATCH}, cost={ w_shaft4=2, o_head6=2, oil=2, sulfur=2 } },
+    { id="ar_sunder", name="破甲箭", cat="fletch", req=7, time=7, learn="master", out={kind="arrow", head="mithril",element="sunder", feather="heavy", qty=D.ARROW_BATCH}, cost={ w_shaft5=2, o_head6=3, h_essence4=2, heavyfeat=2 } },
+    { id="ar_purify", name="净化箭", cat="fletch", req=8, time=8, learn="master", out={kind="arrow", head="adamant",element="purify", feather="plain", qty=D.ARROW_BATCH}, cost={ w_shaft6=2, o_head7=3, h_essence5=3, feather=2 } },
     -- ---- 中间材料 / 药剂 ----
-    { id="ironbar",name="精铁锭", req=3, time=6, learn="level",  out={kind="mat",    id="ironbar",qty=1, color={0.8,0.82,0.88}},  cost={ o_blade2=4, w_char1=2 } },
-    { id="hppot",  name="疗伤药剂",req=2,time=5, learn="level",  out={kind="potion", id="hppot",  qty=1, color={0.9,0.35,0.4}},   cost={ h_heal1=4 } },
-    { id="leather",name="鞣制皮革",req=5,time=7, learn="master", out={kind="mat",    id="leather",qty=2, color={0.7,0.5,0.32}},   cost={ hide=2, h_heal2=1 } },
+    { id="ironbar",name="精铁锭",  cat="mat", req=3, time=6, learn="level",  out={kind="mat",    id="ironbar",qty=1, color={0.8,0.82,0.88}},  cost={ o_blade2=4, w_char1=2 } },
+    { id="hppot",  name="疗伤药剂",cat="mat", req=2, time=5, learn="level",  out={kind="potion", id="hppot",  qty=1, color={0.9,0.35,0.4}},   cost={ h_heal1=4 } },
+    { id="leather",name="鞣制皮革",cat="mat", req=5, time=7, learn="master", out={kind="mat",    id="leather",qty=2, color={0.7,0.5,0.32}},   cost={ hide=2, h_heal2=1 } },
+    -- ============================================================================
+    -- 锻造图谱(§5)：job="forge"，吃 forge 子职业等级/经验。
+    --   炼锭(cat=ingot)：兵刃矿(o_blade)+薪炭木(w_char 燃料) → 锭(stackable,进背包)。
+    --   造装(cat=armor/bow)：out.kind="gear" → do_craft 调 roll_gear(slot,ilvl_base,按 rarity_roll 抽稀有度)，
+    --     产出装备进背包(定向出装第二条线)。wtype 指定弓类型；ilvl_base 由材料档定。
+    -- ============================================================================
+    -- ---- 炼锭(矿→锭) ----
+    { id="fg_copper",   name="铜锭",   cat="ingot", job="forge", req=1, time=5, learn="start", out={kind="mat", id="copper_ingot",  qty=1, color={0.78,0.5,0.32}}, cost={ o_blade2=3, w_char1=1 } },
+    { id="fg_iron",     name="铁锭",   cat="ingot", job="forge", req=3, time=6, learn="level", out={kind="mat", id="iron_ingot",    qty=1, color={0.72,0.74,0.8}},  cost={ o_blade3=3, w_char2=1 } },
+    { id="fg_silver",   name="银锭",   cat="ingot", job="forge", req=6, time=7, learn="level", out={kind="mat", id="silver_ingot",  qty=1, color={0.85,0.88,0.95}}, cost={ o_blade4=3, w_char4=2 } },
+    { id="fg_mithril",  name="秘银锭", cat="ingot", job="forge", req=9, time=8, learn="level", out={kind="mat", id="mithril_ingot", qty=1, color={0.6,0.85,0.9}},   cost={ o_blade5=3, w_char5=2 } },
+    { id="fg_adamant",  name="精金锭", cat="ingot", job="forge", req=12,time=9, learn="level", out={kind="mat", id="adamant_ingot", qty=1, color={0.5,0.8,0.6}},    cost={ o_blade6=3, w_char6=2 } },
+    { id="fg_starsteel",name="星钢锭", cat="ingot", job="forge", req=15,time=10,learn="level", out={kind="mat", id="starsteel_ingot",qty=1, color={0.7,0.7,0.95}}, cost={ o_blade7=3, w_char7=2 } },
+    { id="fg_voidiron", name="虚空铁锭",cat="ingot",job="forge", req=18,time=11,learn="level", out={kind="mat", id="voidiron_ingot",qty=1, color={0.55,0.4,0.7}},  cost={ o_blade8=3, w_char8=3 } },
+    -- ---- 造甲(甲胄矿/锭 + 皮革 → gear，roll 稀有度) ----
+    { id="fg_copper_chest", name="铜甲胸甲", cat="armor", job="forge", req=2,  time=8,  learn="start", out={kind="gear", slot="chest", ilvl_base=6,  rarity_roll={common=0.55,uncommon=0.35,rare=0.10}}, cost={ copper_ingot=4, leather=2 } },
+    { id="fg_iron_chest",   name="精铁胸甲", cat="armor", job="forge", req=4,  time=9,  learn="level", out={kind="gear", slot="chest", ilvl_base=12, rarity_roll={common=0.45,uncommon=0.40,rare=0.15}}, cost={ iron_ingot=4, leather=2 } },
+    { id="fg_iron_legs",    name="精铁腿甲", cat="armor", job="forge", req=4,  time=9,  learn="level", out={kind="gear", slot="legs",  ilvl_base=12, rarity_roll={common=0.45,uncommon=0.40,rare=0.15}}, cost={ iron_ingot=4, leather=2 } },
+    { id="fg_silver_chest", name="银纹胸甲", cat="armor", job="forge", req=8,  time=11, learn="level", out={kind="gear", slot="chest", ilvl_base=26, rarity_roll={uncommon=0.45,rare=0.45,epic=0.10}}, cost={ silver_ingot=5, leather=3 } },
+    { id="fg_silver_head",  name="银纹头盔", cat="armor", job="forge", req=8,  time=10, learn="level", out={kind="gear", slot="head",  ilvl_base=26, rarity_roll={uncommon=0.45,rare=0.45,epic=0.10}}, cost={ silver_ingot=4, leather=2 } },
+    { id="fg_adamant_chest",name="精金胸甲", cat="armor", job="forge", req=13, time=13, learn="level", out={kind="gear", slot="chest", ilvl_base=44, rarity_roll={rare=0.50,epic=0.40,legendary=0.10}}, cost={ adamant_ingot=5, leather=4 } },
+    { id="fg_void_chest",   name="虚空铸甲", cat="armor", job="forge", req=18, time=15, learn="level", out={kind="gear", slot="chest", ilvl_base=58, rarity_roll={epic=0.55,legendary=0.45}},               cost={ voidiron_ingot=6, leather=5 } },
+    -- ---- 造弓(兵刃锭 + 弓臂木 → weapon gear，含 wtype) ----
+    { id="fg_copper_short", name="铜锻短弓", cat="bow", job="forge", req=3,  time=9,  learn="start", out={kind="gear", slot="bow", wtype="shortbow", ilvl_base=6,  rarity_roll={common=0.55,uncommon=0.35,rare=0.10}}, cost={ copper_ingot=4, w_bowarm1=3 } },
+    { id="fg_iron_long",    name="精铁长弓", cat="bow", job="forge", req=5,  time=10, learn="level", out={kind="gear", slot="bow", wtype="longbow",  ilvl_base=14, rarity_roll={uncommon=0.50,rare=0.40,epic=0.10}}, cost={ iron_ingot=5, w_bowarm2=3 } },
+    { id="fg_iron_cross",   name="精铁弩",   cat="bow", job="forge", req=6,  time=10, learn="level", out={kind="gear", slot="bow", wtype="crossbow", ilvl_base=14, rarity_roll={uncommon=0.50,rare=0.40,epic=0.10}}, cost={ iron_ingot=5, w_bowarm3=3 } },
+    { id="fg_silver_short", name="银弦短弓", cat="bow", job="forge", req=9,  time=12, learn="level", out={kind="gear", slot="bow", wtype="shortbow", ilvl_base=28, rarity_roll={rare=0.55,epic=0.35,legendary=0.10}}, cost={ silver_ingot=5, w_bowarm4=3 } },
+    { id="fg_adamant_long", name="精金长弓", cat="bow", job="forge", req=14, time=14, learn="level", out={kind="gear", slot="bow", wtype="longbow",  ilvl_base=46, rarity_roll={rare=0.45,epic=0.45,legendary=0.10}}, cost={ adamant_ingot=5, w_bowarm6=3 } },
+    { id="fg_void_cross",   name="虚空重弩", cat="bow", job="forge", req=19, time=16, learn="level", out={kind="gear", slot="bow", wtype="crossbow", ilvl_base=58, rarity_roll={epic=0.55,legendary=0.45}},               cost={ voidiron_ingot=6, w_bowarm8=4 } },
+}
+-- 锻造图谱 cat → tab 顺序/名(craft 页 forge 区用)
+D.FORGE_TABS = {
+    { id="ingot", name="炼锭" },
+    { id="armor", name="造甲" },
+    { id="bow",   name="造弓" },
 }
 D.BP = {}; for _,b in ipairs(D.BLUEPRINTS) do D.BP[b.id]=b end
 -- 箭头档有序表(低→高)：战斗/recalc 取弹药里最高 phys_mult 用；展示色按 head。
@@ -381,8 +438,9 @@ D.ACTIVITIES = {
     mining  = { name="采矿", kind="gather", group="sub", ord=2, mat="ore",  base=0.6 },
     herb    = { name="采药", kind="gather", group="sub", ord=3, mat="herb", base=0.7 },
     fletch  = { name="制造", kind="craft",  group="sub", ord=4 },
+    forge   = { name="锻造", kind="craft",  group="sub", ord=5, job="forge" },
 }
-D.ACT_ORDER = { "rest", "combat", "woodcut", "mining", "herb", "fletch" }
+D.ACT_ORDER = { "rest", "combat", "woodcut", "mining", "herb", "fletch", "forge" }
 D.ACT_GROUPS = {
     { id="idle",   name="挂机",   col={0.5,0.7,0.95} },
     { id="combat", name="战斗",   col={0.88,0.3,0.3} },

@@ -106,24 +106,29 @@ function prog.gain_gather_xp(key, n)
 end
 
 -- ============================================================================
--- 制造职业经验 / 图谱解锁
+-- 制造/锻造职业经验 / 图谱解锁（两职业共用一套，按 bp.job 路由）
 -- ============================================================================
--- 制造职业升级曲线（比角色平缓：辅助线升得快些）
+-- 子职业等级取数：job="forge" 走 player.forge，否则 player.craft。
+local function job_rec(job) return (job=="forge") and state.player.forge or state.player.craft end
+-- 制造职业升级曲线（比角色平缓：辅助线升得快些）；forge 沿用同曲线
 function prog.craft_need(lv) return math.floor(40*(lv^1.4)) end
+prog.forge_need = prog.craft_need
 function prog.unlock_blueprints()  -- 到达 req 等级自动解锁 level/master 类（master 第一期也按等级解锁，TODO：技能大师）
     for _,b in ipairs(BLUEPRINTS) do
-        if not state.player.bp_known[b.id] and b.learn~="start" and state.player.craft.lvl >= b.req then
+        if not state.player.bp_known[b.id] and b.learn~="start" and job_rec(b.job).lvl >= b.req then
             local oc = (b.out.kind=="arrow") and D.arrow_color(b.out) or (b.out.color or {0.7,0.6,0.4})
             state.player.bp_known[b.id]=true; fx.set_toast("学会图谱："..b.name, oc)
         end
     end
 end
-function prog.add_craft_xp(n)
-    state.player.craft.xp = state.player.craft.xp + n
-    while state.player.craft.xp >= prog.craft_need(state.player.craft.lvl) do
-        state.player.craft.xp = state.player.craft.xp - prog.craft_need(state.player.craft.lvl)
-        state.player.craft.lvl = state.player.craft.lvl + 1
-        fx.floats[#fx.floats+1]={ x=DESIGN_W*0.5, y=DESIGN_H*0.2, text="制造 Lv "..state.player.craft.lvl, color={0.7,0.6,0.4}, timer=1.3, scale=1.2, vy=-45 }
+function prog.add_craft_xp(n, job)
+    local rec = job_rec(job)
+    rec.xp = rec.xp + n
+    while rec.xp >= prog.craft_need(rec.lvl) do
+        rec.xp = rec.xp - prog.craft_need(rec.lvl)
+        rec.lvl = rec.lvl + 1
+        local label = (job=="forge") and "锻造 Lv " or "制造 Lv "
+        fx.floats[#fx.floats+1]={ x=DESIGN_W*0.5, y=DESIGN_H*0.2, text=label..rec.lvl, color={0.7,0.6,0.4}, timer=1.3, scale=1.2, vy=-45 }
         prog.unlock_blueprints()
     end
 end
@@ -133,9 +138,9 @@ end
 -- ============================================================================
 function prog.skill_cost(lvl) return math.floor(15 * (lvl ^ 1.7) + 10) end
 function prog.upgrade_skill(key)
-    local rec = (key=="craft") and state.player.craft or state.player.skill[key]
+    local rec = (key=="craft") and state.player.craft or (key=="forge") and state.player.forge or state.player.skill[key]
     local c = prog.skill_cost(rec.lvl)
-    if state.player.gold >= c then state.player.gold = state.player.gold - c; rec.lvl = rec.lvl + 1 end
+    if state.player.gold >= c then state.player.gold = state.player.gold - c; rec.lvl = rec.lvl + 1; prog.unlock_blueprints() end
 end
 
 return prog

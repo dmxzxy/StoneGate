@@ -72,7 +72,7 @@ function activity_view.draw()
             -- 活动图标（按 kind 简笔，置于行左侧）
             local icx,icy = px+sx(28), yy+e.h/2
             if a.kind=="gather" then draw.icon_mat(a.mat, icx, icy, sy(9))
-            elseif a.kind=="craft" then draw.icon_arrow(icx, icy, sy(10), {0.7,0.6,0.4})
+            elseif a.kind=="craft" then draw.icon_arrow(icx, icy, sy(10), a.job=="forge" and {0.8,0.55,0.4} or {0.7,0.6,0.4})
             elseif a.kind=="combat" then draw.icon_kind("weapon", icx, icy, sy(9), {0.9,0.55,0.5})
             else setc(UI.dim); love.graphics.circle("line", icx, icy, sy(8)); setc(UI.dim); love.graphics.circle("fill", icx, icy, sy(2)) end
             setc(UI.text); love.graphics.setFont(draw.font); love.graphics.print(a.name, px+sx(44), yy+sy(7))
@@ -82,8 +82,14 @@ function activity_view.draw()
                 love.graphics.print(string.format("Lv %d   寻找采集 %s", s.lvl, MAT_NAME[a.mat]), px+sx(44), yy+sy(28))
                 bar(px+sx(44), yy+sy(44), pw-sx(58), sy(6), s.xp/gather_need(s.lvl), MAT_COLOR[a.mat])
             elseif a.kind=="craft" then
-                love.graphics.print(string.format("Lv %d   做工攒经验解锁图谱", state.player.craft.lvl), px+sx(44), yy+sy(28))
-                bar(px+sx(44), yy+sy(44), pw-sx(58), sy(6), state.player.craft.xp/craft_need(state.player.craft.lvl), {0.7,0.6,0.4})
+                if a.job=="forge" then
+                    local f=state.player.forge
+                    love.graphics.print(string.format("Lv %d   炼锭/造装 解锁更高配方", f.lvl), px+sx(44), yy+sy(28))
+                    bar(px+sx(44), yy+sy(44), pw-sx(58), sy(6), f.xp/craft_need(f.lvl), {0.8,0.55,0.4})
+                else
+                    love.graphics.print(string.format("Lv %d   做工攒经验解锁图谱", state.player.craft.lvl), px+sx(44), yy+sy(28))
+                    bar(px+sx(44), yy+sy(44), pw-sx(58), sy(6), state.player.craft.xp/craft_need(state.player.craft.lvl), {0.7,0.6,0.4})
+                end
             elseif a.kind=="combat" then
                 love.graphics.print(state.region.name.."   技能轮转 · 消耗箭矢", px+sx(44), yy+sy(30))
             else

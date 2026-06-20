@@ -84,7 +84,7 @@ local function tap(x,y) try("press@"..x..","..y, function() if love.mousepressed
 -- centers under grouped layout (480x800): idle/combat/sub headers + rows. x=120 is inside drawer.
 local ACT_OPEN = {55, 772}
 local SKILLS_OPEN = {147, 772}
-local ROW = { rest=98, combat=184, woodcut=270, mining=334, herb=398, fletch=462 }
+local ROW = { rest=98, combat=184, woodcut=270, mining=334, herb=398, fletch=462, forge=526 }
 -- open the drawer, wait for slide-in (~0.18s), then tap a row, then let it settle
 local function pick(act) tap(ACT_OPEN[1],ACT_OPEN[2]); frames(6); tap(120, ROW[act]); frames(4) end
 
@@ -97,6 +97,11 @@ pick("herb");    frames(800)
 pick("fletch");  frames(2000)         -- craft until materials drain, then auto-stop
 -- tap a blueprint card in the craft view (lower half) to switch blueprint
 tap(W/2, 460); frames(200)
+-- 锻造活动：开炼锭(挂机做工)，再切到造甲 tab(点 craft 页 tab 行)持续做装
+pick("forge");   frames(1500)
+-- 点制造页分类 tab 行(炼锭/造甲/造弓在下半屏标题之上一排)：x 约第3/4个 tab
+tap(W*0.5, 380); frames(20); tap(W*0.7, 380); frames(20)
+tap(W/2, 460);   frames(1200)         -- 切某图谱卡持续锻造
 pick("combat");  frames(2500)
 -- 技能面板：打开、点各行学习按钮(可能金/料不足)、关闭
 tap(SKILLS_OPEN[1],SKILLS_OPEN[2]); frames(20)
@@ -190,6 +195,59 @@ do
   combat.do_shot(1.0,{})
   combat.resolve_hit(st.projectiles[#st.projectiles])
   check("冰箭命中后敌减速(spd 下降)", en2.spd < spd0)
+end
+
+-- ===== C4 锻造（炼锭 + 造甲造弓 + forge 子职业 + 存档）白盒 =====
+do
+  local D = require("data")
+  local inv = require("sys.inventory")
+  local craft = require("sys.craft")
+  local prog = require("sys.progression")
+  local st = require("core.state")
+  S.init()
+  -- 起始 forge 子职业存在、起始锻造图谱已学
+  check("forge 子职业默认 lvl1", st.player.forge and st.player.forge.lvl==1 and st.player.forge.xp==0)
+  check("forge 活动登记(kind=craft,job=forge)", D.ACTIVITIES.forge and D.ACTIVITIES.forge.kind=="craft" and D.ACTIVITIES.forge.job=="forge")
+  check("起始锻造图谱 fg_copper 已学", st.player.bp_known.fg_copper==true)
+  -- 锭材料登记
+  check("锭材料 copper_ingot 有名/色", D.MAT_NAME.copper_ingot and D.MAT_COLOR.copper_ingot)
+  check("锭材料 voidiron_ingot 登记", D.MAT_NAME.voidiron_ingot~=nil)
+  -- 炼锭：备料后 do_craft 产出锭进背包 + 喂 forge 经验
+  st.player.inv={}; inv.inv_add("mat","o_blade2",6); inv.inv_add("mat","w_char1",2)
+  local fx0 = st.player.forge.xp
+  craft.do_craft(D.BP.fg_copper)
+  check("炼锭后背包有 copper_ingot", inv.inv_count("mat","copper_ingot")>=1)
+  check("炼锭喂 forge 经验(forge.xp 增长，不喂 craft)", st.player.forge.xp>fx0)
+  -- 造装：out.kind=gear → roll_gear 产出装备进背包(定向槽)
+  st.player.inv={}; inv.inv_add("mat","copper_ingot",4); inv.inv_add("mat","leather",2)
+  craft.do_craft(D.BP.fg_copper_chest)
+  local got_gear=nil
+  for i=1,D.BAG_SLOTS do local it=st.player.inv[i]; if it and it.kind=="gear" then got_gear=it.gear end end
+  check("造甲产出 gear 进背包", got_gear~=nil)
+  check("造甲定向到目标槽(chest)", got_gear and got_gear.slot=="chest")
+  -- 造弓：out 带 wtype，产出武器 gear 含该 wtype + 守恒攻速
+  st.player.inv={}; inv.inv_add("mat","copper_ingot",4); inv.inv_add("mat","w_bowarm1",3)
+  craft.do_craft(D.BP.fg_copper_short)
+  local got_bow=nil
+  for i=1,D.BAG_SLOTS do local it=st.player.inv[i]; if it and it.kind=="gear" and it.gear.slot=="bow" then got_bow=it.gear end end
+  check("造弓产出 weapon gear", got_bow~=nil and got_bow.stats.wmin~=nil)
+  check("造弓含指定 wtype(shortbow)", got_bow and got_bow.wtype=="shortbow")
+  -- forge 升级解锁更高配方：拉满 forge 等级后高档锭图谱解锁
+  st.player.forge.lvl=20; prog.unlock_blueprints()
+  check("forge 升级解锁高档锭图谱(fg_voidiron)", st.player.bp_known.fg_voidiron==true)
+  -- forge 经验路由：add_craft_xp(n,"forge") 只动 forge，不动 craft
+  local cx0, fx1 = st.player.craft.xp, st.player.forge.xp
+  prog.add_craft_xp(5, "forge")
+  check("add_craft_xp(_,forge) 只喂 forge", st.player.craft.xp==cx0 and st.player.forge.xp~=fx1 or st.player.forge.lvl>20)
+  -- 存档持久化 forge 职业等级/经验 + forge_bp
+  st.player.forge.lvl=7; st.player.forge.xp=33; st.player.forge_bp="fg_iron_chest"
+  check("save.write(含 forge) 成功", S.save.write()==true)
+  st.player.forge={lvl=1,xp=0}; st.player.forge_bp="fg_copper"
+  check("save.load(含 forge) 成功", S.save.load()==true)
+  local fp = S.state().player
+  check("读档 forge.lvl 复原", fp.forge.lvl==7)
+  check("读档 forge.xp 复原", fp.forge.xp==33)
+  check("读档 forge_bp 复原", fp.forge_bp=="fg_iron_chest")
 end
 
 -- ===== helium require 烟测（验证 mock love 桩对未来 UI 阶段够用）=====

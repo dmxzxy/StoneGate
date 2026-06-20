@@ -109,6 +109,8 @@ local function init()
         skill={ woodcut={lvl=1,xp=0}, mining={lvl=1,xp=0}, herb={lvl=1,xp=0} },
         -- 制造职业：独立，做工攒经验升级（不进 skill 表）
         craft={ lvl=1, xp=0 }, craft_bp="ar_flint", craft_prog=0, craft_target=nil, bp_known={},
+        -- 锻造职业：独立子职业（炼锭/造装），做工攒经验解锁更高配方
+        forge={ lvl=1, xp=0 }, forge_bp="fg_copper",
         gather_node=nil,             -- 遭遇式采集当前节点（含 phase）
         -- 角色技能态：已学技能 / 冷却 / 限时增益 / 释放闪光
         skills={ "shoot" }, cd={}, buffs={}, cast_flash={} }
@@ -133,7 +135,7 @@ end
 -- 收进单个 save 表（避免主 chunk 触及 Lua 200 局部变量上限；文件拆分后会移到 base/save.lua）
 local save = {}
 save.FILE = "quiver/save.lua"
-save.VERSION = 4
+save.VERSION = 5
 local save_timer = 0
 
 -- 序列化一个纯数据值（数字/字符串/布尔/表）到 out 数组
@@ -173,6 +175,7 @@ function save.snapshot()
         gold=state.player.gold, hp=state.player.hp, mp=state.player.mp,
         equip=state.player.equip, inv=inv, ammo=ammo,
         skill=state.player.skill, craft=state.player.craft, craft_bp=state.player.craft_bp,
+        forge=state.player.forge, forge_bp=state.player.forge_bp,
         bp_known=state.player.bp_known, skills=state.player.skills,
         activity=state.activity, region_id=state.region.id, stage=state.stage,
     }
@@ -235,6 +238,11 @@ function save.migrate(data)
         end
         data.version = 4
     end
+    -- v4→v5：锻造(C4)。旧档无 forge 子职业/forge_bp/锭材料 → load 期由 init() 默认补全
+    --   (forge={lvl=1,xp=0}/forge_bp="fg_copper")，无需改 data；锻造图谱按 bp_known 过滤旧 id 安全。
+    if v < 5 then
+        data.version = 5
+    end
     return data
 end
 
@@ -257,9 +265,13 @@ function save.load()
         state.player.skill = data.skill or state.player.skill
         state.player.craft = data.craft or state.player.craft
         state.player.craft_bp = (data.craft_bp and BP[data.craft_bp]) and data.craft_bp or "ar_flint"
+        -- 锻造职业：旧档无 forge → 用 init() 默认；forge_bp 校验存在性
+        state.player.forge = data.forge or state.player.forge
+        state.player.forge_bp = (data.forge_bp and BP[data.forge_bp]) and data.forge_bp or "fg_copper"
         -- 已知图谱/已学技能：按当前表过滤掉已删除的 id（防改表后崩）
         state.player.bp_known = {}; for id in pairs(data.bp_known or {}) do if BP[id] then state.player.bp_known[id]=true end end
-        state.player.bp_known.ar_flint = true
+        -- start 类图谱(燧石箭/铜锭/铜甲/铜短弓...)始终保底已知(旧档无锻造起始配方也补上)
+        for _,b in ipairs(BLUEPRINTS) do if b.learn=="start" then state.player.bp_known[b.id]=true end end
         state.player.skills = {}; for _,id in ipairs(data.skills or {}) do if SKILLS[id] then state.player.skills[#state.player.skills+1]=id end end
         if #state.player.skills==0 then state.player.skills={"shoot"} end
         -- inv/ammo：定长补 nil（稀疏表回填，绝不丢洞后物品）。
