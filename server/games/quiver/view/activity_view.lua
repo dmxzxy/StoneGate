@@ -72,7 +72,10 @@ function activity_view.draw()
             -- 活动图标（像素剪影，按 kind，置于行左侧）
             local icx,icy = px+sx(28), yy+e.h/2
             if a.kind=="gather" then draw.pixel_icon("gather", icx, icy, sy(11), MAT_COLOR[a.mat] or {0.6,0.8,0.5})
-            elseif a.kind=="craft" then draw.pixel_icon(a.job=="forge" and "forge" or "craft", icx, icy, sy(11), a.job=="forge" and {0.85,0.6,0.4} or {0.8,0.7,0.45})
+            elseif a.kind=="craft" then
+                local jic = (a.job=="forge" and "forge") or (a.job=="alchemy" and "craft") or "craft"
+                local jcol = (a.job=="forge" and {0.85,0.6,0.4}) or (a.job=="alchemy" and {0.6,0.8,0.55}) or {0.8,0.7,0.45}
+                draw.pixel_icon(jic, icx, icy, sy(11), jcol)
             elseif a.kind=="combat" then draw.pixel_icon("combat", icx, icy, sy(11), {0.92,0.55,0.5})
             else draw.pixel_icon("rest", icx, icy, sy(11), UI.dim) end
             setc(UI.text); love.graphics.setFont(draw.font); love.graphics.print(a.name, px+sx(44), yy+sy(7))
@@ -82,14 +85,12 @@ function activity_view.draw()
                 love.graphics.print(string.format("Lv %d   寻找采集 %s", s.lvl, MAT_NAME[a.mat]), px+sx(44), yy+sy(28))
                 bar(px+sx(44), yy+sy(44), pw-sx(58), sy(6), s.xp/gather_need(s.lvl), MAT_COLOR[a.mat])
             elseif a.kind=="craft" then
-                if a.job=="forge" then
-                    local f=state.player.forge
-                    love.graphics.print(string.format("Lv %d   炼锭/造装 解锁更高配方", f.lvl), px+sx(44), yy+sy(28))
-                    bar(px+sx(44), yy+sy(44), pw-sx(58), sy(6), f.xp/craft_need(f.lvl), {0.8,0.55,0.4})
-                else
-                    love.graphics.print(string.format("Lv %d   做工攒经验解锁图谱", state.player.craft.lvl), px+sx(44), yy+sy(28))
-                    bar(px+sx(44), yy+sy(44), pw-sx(58), sy(6), state.player.craft.xp/craft_need(state.player.craft.lvl), {0.7,0.6,0.4})
-                end
+                -- 工程/锻造/制药 各自独立等级条(按活动 job 取对应职业记录)
+                local rec = state.player[a.job or "engineer"] or state.player.engineer
+                local desc = (a.job=="forge" and "炼锭/造装 解锁更高配方") or (a.job=="alchemy" and "炼制药剂 解锁更多配方") or "造箭 解锁更多箭谱"
+                local jcol = (a.job=="forge" and {0.8,0.55,0.4}) or (a.job=="alchemy" and {0.6,0.8,0.55}) or {0.7,0.6,0.4}
+                love.graphics.print(string.format("Lv %d   %s", rec.lvl, desc), px+sx(44), yy+sy(28))
+                bar(px+sx(44), yy+sy(44), pw-sx(58), sy(6), rec.xp/craft_need(rec.lvl), jcol)
             elseif a.kind=="combat" then
                 love.graphics.print(state.region.name.."   技能轮转 · 消耗箭矢", px+sx(44), yy+sy(30))
             else

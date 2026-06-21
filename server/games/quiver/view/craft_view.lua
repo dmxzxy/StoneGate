@@ -31,15 +31,16 @@ local draw_item_icon = items.draw_item_icon
 
 local craft_view = {}
 
--- 制造页分类 tab：制箭/材料 走 craft 职业；炼锭/造甲/造弓 走 forge 职业。
--- 选中的 tab 存 state.player.craft_tab(默认按当前活动给：forge 活动默认炼锭)。
-local TABS = {
-    { id="fletch", name="制箭", job=nil },
-    { id="mat",    name="材料", job=nil },
-    { id="ingot",  name="炼锭", job="forge" },
-    { id="armor",  name="造甲", job="forge" },
-    { id="bow",    name="造弓", job="forge" },
+-- 每个制造职业有自己的页面与分类 tab：工程→[制箭]；锻造→[炼锭/造甲/造弓]；制药→[药剂]。
+-- 当前活动的 job 决定显示哪组 tab；选中的 tab 存 state.player.craft_tab（跨职业复用，非法时回该职业首个）。
+local JOB_TABS = {
+    engineer = { { id="engineer", name="制箭" } },
+    forge    = { { id="ingot", name="炼锭" }, { id="armor", name="造甲" }, { id="bow", name="造弓" } },
+    alchemy  = { { id="potion", name="药剂" } },
 }
+local JOB_BP = { engineer="engineer_bp", forge="forge_bp", alchemy="alchemy_bp" }
+local function cur_job() return require("sys.craft").cur_job() end
+local function cur_tabs() return JOB_TABS[cur_job()] or JOB_TABS.engineer end
 
 -- 图谱产物图标：箭矢按三轴派生，装备按目标槽 kind，其它按 id。
 local function out_icon_item(o)
@@ -64,24 +65,25 @@ local function bp_color(b)
 end
 
 -- 制造图谱卡片几何（draw 与 hit 共用）：下半屏竖排，只列当前 tab 下已知图谱
--- 当前选中 tab（默认随活动：forge 活动给炼锭，否则制箭）
+-- 当前选中 tab（限定在当前职业的 tab 组内，非法回首个）
 function craft_view.cur_tab()
+    local tabs = cur_tabs()
     local t = state.player.craft_tab
-    for _,tb in ipairs(TABS) do if tb.id==t then return t end end
-    return (state.activity=="forge") and "ingot" or "fletch"
+    for _,tb in ipairs(tabs) do if tb.id==t then return t end end
+    return tabs[1].id
 end
 function craft_view.craft_known_list()
     local tab = craft_view.cur_tab()
     local list={}; for _,b in ipairs(BLUEPRINTS) do
-        if state.player.bp_known[b.id] and (b.cat or "fletch")==tab then list[#list+1]=b end
+        if state.player.bp_known[b.id] and b.cat==tab then list[#list+1]=b end
     end
     return list
 end
 local craft_known_list = craft_view.craft_known_list
 
--- tab 行几何（下半屏标题之上一排）
+-- tab 行几何（下半屏标题之上一排）；按当前职业 tab 数布局
 function craft_view.tab_rect(i)
-    local w=love.graphics.getWidth(); local n=#TABS; local gap=sx(4)
+    local w=love.graphics.getWidth(); local n=#cur_tabs(); local gap=sx(4)
     local tw=(w-sx(40)-gap*(n-1))/n; local th=sy(22)
     local top=DESIGN_H*0.55*screen.sh - sy(40)
     return sx(20)+(i-1)*(tw+gap), top, tw, th
@@ -93,19 +95,15 @@ function craft_view.craft_card_rect(slot)
 end
 local craft_card_rect = craft_view.craft_card_rect
 
--- 当前 tab 选中的图谱 id：forge 类 tab 用 forge_bp，否则 craft_bp。
+-- 当前选中图谱 id：取当前职业的 _bp 字段
 local function sel_bp_id()
-    local tab = craft_view.cur_tab()
-    for _,tb in ipairs(TABS) do if tb.id==tab then
-        return (tb.job=="forge") and state.player.forge_bp or state.player.craft_bp
-    end end
-    return state.player.craft_bp
+    return state.player[JOB_BP[cur_job()]]
 end
 
 function craft_view.draw()
     local sw, sh = screen.sw, screen.sh
     local cx = love.graphics.getWidth()/2
-    local is_forge = (state.activity=="forge") or (craft_view.cur_tab()=="ingot" or craft_view.cur_tab()=="armor" or craft_view.cur_tab()=="bow")
+    local is_forge = (cur_job()=="forge")
 
     -- ── 像素世界：场景画布（上半屏暮色工坊）──
     screen.begin_scene()
@@ -148,9 +146,9 @@ function craft_view.draw()
             setc(ok and UI.text or UI.bad); love.graphics.setFont(draw.font_sm); love.graphics.print(inv_count("mat",m).."/"..n, mx-sx(6), py-sy(62))
         end
     end
-    -- 分类 tab 行（制箭/材料/炼锭/造甲/造弓）
+    -- 分类 tab 行（仅当前职业的分类）
     local curtab = craft_view.cur_tab()
-    for i,tb in ipairs(TABS) do
+    for i,tb in ipairs(cur_tabs()) do
         local tx,ty,tw,th = craft_view.tab_rect(i); local on=(tb.id==curtab)
         panel(tx,ty,tw,th, on and {0.18,0.2,0.3,0.97} or {0.11,0.12,0.17,0.9}, on and UI.btn or UI.line, 5*sw)
         setc(on and UI.text or UI.dim); love.graphics.setFont(draw.font_sm); love.graphics.printf(tb.name, tx, ty+sy(3), tw, "center")
@@ -178,17 +176,16 @@ end
 
 local function hit(x,y,rx,ry,rw,rh) return x>=rx and x<=rx+rw and y>=ry and y<=ry+rh end
 
--- 无面板场景内交互：点 tab = 切分类；点下半屏图谱卡 = 选图谱、按其 job 切活动并持续制造
+-- 无面板场景内交互：点 tab = 切分类；点下半屏图谱卡 = 选图谱并持续制造(职业由当前活动决定)
 function craft_view.hit(x,y)
-    for i,tb in ipairs(TABS) do
+    for i,tb in ipairs(cur_tabs()) do
         local tx,ty,tw,th = craft_view.tab_rect(i)
         if hit(x,y,tx,ty,tw,th) then state.player.craft_tab=tb.id; return true end
     end
     for slot,b in ipairs(craft_known_list()) do
         local cxr,cyr,cwr,chr = craft_card_rect(slot)
         if hit(x,y,cxr,cyr,cwr,chr) then
-            if b.job=="forge" then state.player.forge_bp=b.id; state.activity="forge"
-            else state.player.craft_bp=b.id; state.activity="fletch" end
+            state.player[JOB_BP[b.job or "engineer"]] = b.id   -- 写入该 job 的当前图谱
             state.player.craft_prog=0; state.player.craft_stopped=nil; return true
         end
     end

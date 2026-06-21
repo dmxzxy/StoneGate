@@ -85,7 +85,7 @@ local function tap(x,y) try("press@"..x..","..y, function() if love.mousepressed
 -- centers under grouped layout (480x800): idle/combat/sub headers + rows. x=120 is inside drawer.
 local ACT_OPEN = {55, 772}
 local SKILLS_OPEN = {147, 772}
-local ROW = { rest=98, combat=184, woodcut=270, mining=334, herb=398, fletch=462, forge=526 }
+local ROW = { rest=98, combat=184, woodcut=270, mining=334, herb=398, engineer=462, forge=526, alchemy=590 }
 -- open the drawer, wait for slide-in (~0.18s), then tap a row, then let it settle
 local function pick(act) tap(ACT_OPEN[1],ACT_OPEN[2]); frames(6); tap(120, ROW[act]); frames(4) end
 
@@ -95,7 +95,7 @@ frames(10)
 pick("woodcut"); frames(800)
 pick("mining");  frames(800)
 pick("herb");    frames(800)
-pick("fletch");  frames(2000)         -- craft until materials drain, then auto-stop
+pick("engineer");  frames(2000)         -- craft until materials drain, then auto-stop
 -- tap a blueprint card in the craft view (lower half) to switch blueprint
 tap(W/2, 460); frames(200)
 -- 锻造活动：开炼锭(挂机做工)，再切到造甲 tab(点 craft 页 tab 行)持续做装
@@ -236,10 +236,10 @@ do
   -- forge 升级解锁更高配方：拉满 forge 等级后高档锭图谱解锁
   st.player.forge.lvl=20; prog.unlock_blueprints()
   check("forge 升级解锁高档锭图谱(fg_voidiron)", st.player.bp_known.fg_voidiron==true)
-  -- forge 经验路由：add_craft_xp(n,"forge") 只动 forge，不动 craft
-  local cx0, fx1 = st.player.craft.xp, st.player.forge.xp
+  -- forge 经验路由：add_craft_xp(n,"forge") 只动 forge，不动 engineer
+  local cx0, fx1 = st.player.engineer.xp, st.player.forge.xp
   prog.add_craft_xp(5, "forge")
-  check("add_craft_xp(_,forge) 只喂 forge", st.player.craft.xp==cx0 and st.player.forge.xp~=fx1 or st.player.forge.lvl>20)
+  check("add_craft_xp(_,forge) 只喂 forge", st.player.engineer.xp==cx0 and st.player.forge.xp~=fx1 or st.player.forge.lvl>20)
   -- 存档持久化 forge 职业等级/经验 + forge_bp
   st.player.forge.lvl=7; st.player.forge.xp=33; st.player.forge_bp="fg_iron_chest"
   check("save.write(含 forge) 成功", S.save.write()==true)

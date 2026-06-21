@@ -155,11 +155,14 @@ function prog.gain_gather_xp(key, n)
 end
 
 -- ============================================================================
--- 制造/锻造职业经验 / 图谱解锁（两职业共用一套，按 bp.job 路由）
+-- 三制造职业经验 / 图谱解锁（工程/锻造/制药共用一套，按 bp.job 路由）
 -- ============================================================================
--- 子职业等级取数：job="forge" 走 player.forge，否则 player.craft。
-local function job_rec(job) return (job=="forge") and state.player.forge or state.player.craft end
--- 制造职业升级曲线（比角色平缓：辅助线升得快些）；forge 沿用同曲线
+-- 子职业等级取数：按 job 取对应职业记录(engineer/forge/alchemy)，缺省回工程。
+local function job_rec(job)
+    return state.player[job or "engineer"] or state.player.engineer
+end
+local JOB_LABEL = { engineer="工程", forge="锻造", alchemy="制药" }
+-- 制造职业升级曲线（比角色平缓：辅助线升得快些）；三职业共用
 function prog.craft_need(lv) return math.floor(40*(lv^1.4)) end
 prog.forge_need = prog.craft_need
 function prog.unlock_blueprints()  -- 到达 req 等级自动解锁 level/master 类（master 第一期也按等级解锁，TODO：技能大师）
@@ -176,18 +179,17 @@ function prog.add_craft_xp(n, job)
     while rec.xp >= prog.craft_need(rec.lvl) do
         rec.xp = rec.xp - prog.craft_need(rec.lvl)
         rec.lvl = rec.lvl + 1
-        local label = (job=="forge") and "锻造 Lv " or "制造 Lv "
-        fx.floats[#fx.floats+1]={ x=DESIGN_W*0.5, y=DESIGN_H*0.2, text=label..rec.lvl, color={0.7,0.6,0.4}, timer=1.3, scale=1.2, vy=-45 }
+        fx.floats[#fx.floats+1]={ x=DESIGN_W*0.5, y=DESIGN_H*0.2, text=(JOB_LABEL[job or "engineer"]).." Lv "..rec.lvl, color={0.7,0.6,0.4}, timer=1.3, scale=1.2, vy=-45 }
         prog.unlock_blueprints()
     end
 end
 
 -- ============================================================================
--- 金币加速：采集职业(skill[key].lvl) 与 制造职业(craft.lvl) 都能花钱直接升一级
+-- 金币加速：采集职业(skill[key].lvl) 与 制造类职业(engineer/forge/alchemy) 都能花钱直接升一级
 -- ============================================================================
 function prog.skill_cost(lvl) return math.floor(15 * (lvl ^ 1.7) + 10) end
 function prog.upgrade_skill(key)
-    local rec = (key=="craft") and state.player.craft or (key=="forge") and state.player.forge or state.player.skill[key]
+    local rec = (key=="engineer" or key=="forge" or key=="alchemy") and state.player[key] or state.player.skill[key]
     local c = prog.skill_cost(rec.lvl)
     if state.player.gold >= c then state.player.gold = state.player.gold - c; rec.lvl = rec.lvl + 1; prog.unlock_blueprints() end
 end

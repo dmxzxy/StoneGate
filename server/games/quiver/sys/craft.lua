@@ -47,19 +47,24 @@ function craft.do_craft(bp)
     prog.recalc()
 end
 
--- 当前活动选中的图谱 id：forge 活动用 forge_bp，否则 craft_bp。
+-- 当前活动对应的职业 + 选中图谱 id：工程→engineer_bp / 锻造→forge_bp / 制药→alchemy_bp。
+local JOB_BP = { engineer="engineer_bp", forge="forge_bp", alchemy="alchemy_bp" }
+local JOB_DEF = { engineer="ar_flint", forge="fg_copper", alchemy="al_hp1" }
+function craft.cur_job()
+    return ACTIVITIES[state.activity].job or "engineer"
+end
 function craft.cur_bp_id()
-    return (state.activity=="forge") and (state.player.forge_bp or "fg_copper")
-        or (state.player.craft_bp or "ar_flint")
+    local job = craft.cur_job()
+    return state.player[JOB_BP[job]] or JOB_DEF[job]
 end
 
--- craft 挂机 tick：按当前活动选中图谱持续制造（制造/锻造共用），材料用尽自动停摆并提示一次
+-- craft 挂机 tick：按当前活动(工程/锻造/制药)选中图谱持续制造，材料用尽自动停摆并提示一次
 function craft.tick(dt)
-    local job = ACTIVITIES[state.activity].job   -- forge 活动带 job="forge"，制造为 nil
+    local job = craft.cur_job()
     local bp = BP[craft.cur_bp_id()]
     state.player.craft_target = bp
     if bp and state.player.bp_known[bp.id] and craft.can_craft(bp) then
-        local lvl = (job=="forge") and state.player.forge.lvl or state.player.craft.lvl
+        local lvl = (state.player[job] or state.player.engineer).lvl
         state.player.craft_prog = (state.player.craft_prog or 0) + CRAFT_BASE * lvl / bp.time * dt
         if state.player.craft_prog >= 1 then
             state.player.craft_prog = state.player.craft_prog - 1

@@ -135,10 +135,11 @@ function init()
         energy=D.ENERGY_MAX, energy_max=D.ENERGY_MAX, last_time=(love.timer and love.timer.getTime and love.timer.getTime()) or os.time(),
         -- 采集职业：独立等级 + 经验（靠采集攒经验升级，与角色等级分离）
         skill={ woodcut={lvl=1,xp=0}, mining={lvl=1,xp=0}, herb={lvl=1,xp=0} },
-        -- 制造职业：独立，做工攒经验升级（不进 skill 表）
-        craft={ lvl=1, xp=0 }, craft_bp="ar_flint", craft_prog=0, craft_target=nil, bp_known={},
-        -- 锻造职业：独立子职业（炼锭/造装），做工攒经验解锁更高配方
+        -- 三个制造类副职业：工程(造箭)/锻造(炼锭+造甲造弓)/制药(药剂)，各自独立等级+当前图谱
+        engineer={ lvl=1, xp=0 }, engineer_bp="ar_flint",
         forge={ lvl=1, xp=0 }, forge_bp="fg_copper",
+        alchemy={ lvl=1, xp=0 }, alchemy_bp="al_hp1",
+        craft_prog=0, craft_target=nil, bp_known={},
         gather_node=nil,             -- 遭遇式采集当前节点（含 phase）
         -- 战斗精通(满级软成长)：points=可分配点，<id>=各精通已投级数
         mastery={ points=0 },
@@ -168,7 +169,7 @@ end
 -- 收进单个 save 表（避免主 chunk 触及 Lua 200 局部变量上限；文件拆分后会移到 base/save.lua）
 save = {}
 save.FILE = "quiver/save.lua"
-save.VERSION = 9
+save.VERSION = 10
 local save_timer = 0
 
 -- 序列化一个纯数据值（数字/字符串/布尔/表）到 out 数组
@@ -207,8 +208,10 @@ function save.snapshot()
         base_str=state.player.base_str, base_agi=state.player.base_agi, base_sta=state.player.base_sta,
         gold=state.player.gold, hp=state.player.hp, mp=state.player.mp,
         equip=state.player.equip, inv=inv, ammo=ammo,
-        skill=state.player.skill, craft=state.player.craft, craft_bp=state.player.craft_bp,
+        skill=state.player.skill,
+        engineer=state.player.engineer, engineer_bp=state.player.engineer_bp,
         forge=state.player.forge, forge_bp=state.player.forge_bp,
+        alchemy=state.player.alchemy, alchemy_bp=state.player.alchemy_bp,
         energy=state.player.energy, energy_max=state.player.energy_max, last_time=state.player.last_time,
         mastery=state.player.mastery,
         settings=state.player.settings,
@@ -315,11 +318,14 @@ function save.load()
         end
         state.player.equip = data.equip or {}
         state.player.skill = data.skill or state.player.skill
-        state.player.craft = data.craft or state.player.craft
-        state.player.craft_bp = (data.craft_bp and BP[data.craft_bp]) and data.craft_bp or "ar_flint"
-        -- 锻造职业：旧档无 forge → 用 init() 默认；forge_bp 校验存在性
+        -- 三制造职业(工程/锻造/制药)：旧档(v9-)只有 craft → 迁移为 engineer(造箭那条线)
+        state.player.engineer = data.engineer or data.craft or state.player.engineer
+        state.player.engineer_bp = (data.engineer_bp and BP[data.engineer_bp]) and data.engineer_bp
+                                or (data.craft_bp and BP[data.craft_bp]) and data.craft_bp or "ar_flint"
         state.player.forge = data.forge or state.player.forge
         state.player.forge_bp = (data.forge_bp and BP[data.forge_bp]) and data.forge_bp or "fg_copper"
+        state.player.alchemy = data.alchemy or state.player.alchemy
+        state.player.alchemy_bp = (data.alchemy_bp and BP[data.alchemy_bp]) and data.alchemy_bp or "al_hp1"
         -- 探险许可：复原账本，再按 last_time 折算离线恢复(catch_up 在 recalc 后调)
         state.player.energy_max = data.energy_max or D.ENERGY_MAX
         state.player.energy = data.energy or state.player.energy_max
