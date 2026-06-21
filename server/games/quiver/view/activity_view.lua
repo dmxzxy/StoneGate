@@ -102,6 +102,9 @@ end
 
 function activity_view.hit(x,y)
     local px,py,pw,ph,base = act_base()
+    -- 抽屉还没基本滑出来时(动画中)不响应任何关闭/点选——否则刚开那几帧 px+pw≈0，
+    -- 任意点都会命中"点外侧关闭"，把刚打开的抽屉立刻关掉(活动专属、别的面板没这逻辑)。
+    if (state.drawer_t or 0) < 0.5 then return true end
     if draw.hit_close_x(x,y,px,py,pw) then state.panel_open=nil; return true end
     if x > px+pw then state.panel_open=nil; return true end   -- 点抽屉外侧（scrim）= 收起
     for _,e in ipairs(act_layout()) do
