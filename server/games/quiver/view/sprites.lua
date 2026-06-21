@@ -177,13 +177,13 @@ local function bone(x1,y1,x2,y2,w,col)
     C(col); local d=math.sqrt((x2-x1)^2+(y2-y1)^2); local steps=math.max(2,math.ceil(d))
     for i=0,steps do local u=i/steps; love.graphics.circle("fill",x1+(x2-x1)*u,y1+(y2-y1)*u,w) end
 end
--- 头（大头 chibi + 兜帽）。所有姿势共用，hx/hy 头心。
+-- 头（大头 chibi，无帽：肤色头 + 一撮头发 + 眼点）。所有姿势共用，hx/hy 头心。
 local function draw_head(hx, hy)
     local hr=6
     C(P.outl); love.graphics.circle("fill",hx,hy,hr+0.6)
     C(P.skin); love.graphics.circle("fill",hx,hy,hr)
-    C(P.hood); love.graphics.arc("fill","pie",hx,hy,hr+0.8,math.pi*1.05,math.pi*1.95)
-    C(P.hood_hi); love.graphics.arc("fill","pie",hx,hy,hr-1,math.pi*1.15,math.pi*1.5)
+    -- 头发：盖住上半弧(无帽,但不秃)
+    C({0.34,0.24,0.16}); love.graphics.arc("fill","pie",hx,hy,hr,math.pi*1.02,math.pi*1.98)
     C(P.outl); love.graphics.rectangle("fill",hx+2,hy-1,1,1)
 end
 function sprites.draw_hero(cx, gy, t, pose, tool, draw_amt)

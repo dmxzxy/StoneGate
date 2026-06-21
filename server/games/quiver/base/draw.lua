@@ -331,7 +331,7 @@ function draw.draw_hero_chibi(ox, oy, ps, phase)
     local kL={P(-3,-6)}; local fL={P(-5,0)}; local kR={P(3,-6)}; local fR={P(4,0)}
     -- 画一条"骨"：沿线撒像素圆点（粗细 w，像素格单位），保留 ref 的颗粒感
     local OUTL={0.11,0.09,0.12}; local SKIN={0.93,0.74,0.52}
-    local HOOD={0.28,0.50,0.36}; local HOODHI={0.38,0.64,0.46}; local ACC={0.96,0.75,0.34}
+    local TUNIC={0.30,0.42,0.55}; local TUNIC_HI={0.42,0.56,0.70}; local HAIR={0.34,0.24,0.16}; local ACC={0.96,0.75,0.34}
     local function bone(a,b,w,col)
         setc(col); local dx,dy=b[1]-a[1],b[2]-a[2]; local d=math.sqrt(dx*dx+dy*dy)
         local steps=math.max(2,math.ceil(d/ps)); for i=0,steps do local u=i/steps
@@ -340,16 +340,15 @@ function draw.draw_hero_chibi(ox, oy, ps, phase)
     -- 腿
     bone(pelvis,kL,1.4,OUTL); bone(kL,fL,1.4,OUTL)
     bone(pelvis,kR,1.4,OUTL); bone(kR,fR,1.4,OUTL)
-    -- 躯干（带兜帽袍色一段，区别于细线版）
-    bone(pelvis,chest,1.9,HOOD); bone(pelvis,chest,1.2,HOODHI)
-    -- 手臂（肩→肘 兜帽色，肘→手 肤色）
-    bone(sh,fElb,1.3,HOOD); bone(fElb,fHand,1.3,SKIN)
-    bone(sh,bElb,1.3,HOOD); bone(bElb,bHand,1.3,SKIN)
-    -- 头（大头 chibi：描边 + 肤 + 兜帽弧 + 一个眼点）
+    -- 躯干（上衣色一段，区别于细线版）
+    bone(pelvis,chest,1.9,TUNIC); bone(pelvis,chest,1.2,TUNIC_HI)
+    -- 手臂（肩→肘 上衣色，肘→手 肤色）
+    bone(sh,fElb,1.3,TUNIC); bone(fElb,fHand,1.3,SKIN)
+    bone(sh,bElb,1.3,TUNIC); bone(bElb,bHand,1.3,SKIN)
+    -- 头（大头 chibi，无帽：描边 + 肤 + 头发弧 + 一个眼点）
     setc(OUTL); love.graphics.circle("fill",head[1],head[2],hr+ps*0.6)
     setc(SKIN); love.graphics.circle("fill",head[1],head[2],hr)
-    setc(HOOD);   love.graphics.arc("fill","pie",head[1],head[2],hr+ps*0.8,math.pi*1.05,math.pi*1.95)
-    setc(HOODHI); love.graphics.arc("fill","pie",head[1],head[2],hr-ps,  math.pi*1.15,math.pi*1.5)
+    setc(HAIR); love.graphics.arc("fill","pie",head[1],head[2],hr,math.pi*1.02,math.pi*1.98)   -- 头发(无帽不秃)
     setc(OUTL); love.graphics.rectangle("fill",head[1]+ps*2,head[2]-ps,ps,ps)   -- 眼
     -- 弓（前手处的弧 + 弦 + 箭）
     setc({0.55,0.37,0.20}); love.graphics.setLineWidth(math.max(1,ps*1.4))

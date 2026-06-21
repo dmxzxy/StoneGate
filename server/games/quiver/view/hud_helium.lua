@@ -51,23 +51,16 @@ local function btn_icon(id, cx, cy, s, col)
 end
 
 -- ----------------------------------------------------------------------------
--- topcard 渲染：角色卡 + 三条 + 右上资源。纯画，无输入订阅。
+-- topcard 渲染：只保留 角色头像 + 等级（去掉 HP/MP/经验三条与右上资源列；血条移到场景、金币移到背包按钮）。
 -- ----------------------------------------------------------------------------
 local function draw_topcard()
     local w = love.graphics.getWidth()
     local p = state.player
-    -- 顶栏底板（盖住设计区 0..62）
-    love.graphics.setColor(0.05,0.06,0.1,0.95); love.graphics.rectangle("fill",0,0,w,sy(64))
-    love.graphics.setColor(UI.btn[1],UI.btn[2],UI.btn[3],0.5); love.graphics.rectangle("fill",0,sy(64)-2*screen.sh,w,2*screen.sh)
-
     -- 头像卡(8,6,62,54)：scissor 内露 chibi 弓手半身+弓臂，脚落框外
     local cx,cy,cw,ch = sx(8),sy(6),sx(56),sy(54)
     draw.panel(cx,cy,cw,ch, {0.1,0.11,0.16,0.95}, UI.line, sx(6))
-    -- 卡内暮色底（与场景同调），衬出像素剪影
     setc({0.14,0.13,0.22,0.95}); love.graphics.rectangle("fill",cx+sx(2),cy+sy(2),cw-sx(4),ch-sy(4))
-    love.graphics.push("all")
-    love.graphics.setScissor(cx,cy,cw,ch)
-    -- chibi 像素弓手：脚在框下沿外 → 只露上半身+大头+弓臂；像素格随缩放取整
+    love.graphics.push("all"); love.graphics.setScissor(cx,cy,cw,ch)
     local ps = math.max(2, sx(1.7))
     draw.draw_hero_chibi(cx+cw*0.5, cy+ch+sy(20), ps, draw.t)
     love.graphics.pop()
@@ -75,31 +68,17 @@ local function draw_topcard()
     setc(UI.gold); love.graphics.circle("fill", cx+sx(11), cy+ch-sy(11), sx(10))
     setc({0.1,0.09,0.05}); love.graphics.setFont(draw.font_sm)
     love.graphics.printf(p.level, cx+sx(11)-sx(10), cy+ch-sy(11)-draw.font_sm:getHeight()/2, sx(20), "center")
-
-    -- 三条：HP(最粗) / MP(中) / 经验(最细)，起点在头像右侧；右端给资源列留足空间(金钱可达"9金99银")
-    local bx = cx+cw+sx(10); local bw = (w - sx(140)) - bx
-    bar(bx, sy(10), bw, sy(9),  p.hp/p.max_hp,        UI.good, math.floor(p.hp).."/"..math.floor(p.max_hp))
-    bar(bx, sy(22), bw, sy(7),  (p.mp or 0)/(p.max_mp or 1), UI.btn, "MP "..math.floor(p.mp or 0))
-    bar(bx, sy(33), bw, sy(5),  p.xp/p.xp_next,       UI.xp)
-
-    -- 右上资源列：金钱(铜银金分级显示) / 许可(energy) / 钥匙总数。列宽 ~110px(含图标)，右侧留给齿轮
-    local rx = w - sx(128)
-    local cp = draw.coin_parts(p.gold)
-    local ctier = (cp.g>0 and "gold") or (cp.s>0 and "silver") or "copper"
-    icon_coin(rx, sy(11), sx(7), ctier)
-    setc(ctier=="gold" and UI.gold or ctier=="silver" and {0.82,0.85,0.9} or {0.82,0.52,0.30})
-    love.graphics.setFont(draw.font_sm); love.graphics.print(draw.coin_str(p.gold), rx+sx(12), sy(7))
-    -- 探险许可：文牒图标 + 当前/上限
-    draw.pixel_icon("license", rx, sy(27), sx(8), {0.55,0.78,0.95})
-    setc({0.6,0.82,1}); love.graphics.print(math.floor(p.energy or 0).."/"..math.floor(p.energy_max or 0), rx+sx(12), sy(23))
-    -- 钥匙：三种 boss 钥匙总数
+    -- 头像右侧：名字 + 一行小字资源(许可/钥匙)，简洁不堆条
+    setc(UI.text); love.graphics.setFont(draw.font); love.graphics.print("弓手 Lv"..p.level, cx+cw+sx(10), sy(10))
+    love.graphics.setFont(draw.font_sm); setc({0.6,0.82,1})
+    draw.pixel_icon("license", cx+cw+sx(16), sy(36), sx(7), {0.55,0.78,0.95})
+    love.graphics.print(math.floor(p.energy or 0).."/"..math.floor(p.energy_max or 0), cx+cw+sx(26), sy(31))
     local keys = (inv.inv_count("mat","iron_key") or 0)+(inv.inv_count("mat","ember_key") or 0)+(inv.inv_count("mat","void_key") or 0)
-    draw.pixel_icon("key", rx, sy(43), sx(8), {0.9,0.78,0.4})
-    setc({0.95,0.85,0.5}); love.graphics.print(keys, rx+sx(12), sy(39))
-
-    -- toast 在卡片之下淡出（不压资源区）
+    draw.pixel_icon("key", cx+cw+sx(74), sy(36), sx(7), {0.9,0.78,0.4})
+    setc({0.95,0.85,0.5}); love.graphics.print(keys, cx+cw+sx(84), sy(31))
+    -- toast 在卡片之下淡出
     if fx.toast then love.graphics.setFont(draw.font_sm); setc(fx.toast.color, math.min(1,fx.toast.timer))
-        love.graphics.printf(fx.toast.text, 0, sy(48), w-sx(10), "right") end
+        love.graphics.printf(fx.toast.text, 0, sy(50), w-sx(10), "right") end
 end
 
 -- ----------------------------------------------------------------------------
@@ -123,6 +102,15 @@ local function draw_bottombar()
         -- 文字在下
         love.graphics.setFont(draw.font_sm); setc(UI.text)
         love.graphics.printf(lbl[1], r.x, r.y+r.h-sy(15), r.w, "center")
+        -- 背包按钮上方挂金币(铜银金分级)：钱包归在背包入口
+        if BTN_IDS[i]=="bag" then
+            local cp = draw.coin_parts(p.gold)
+            local ctier = (cp.g>0 and "gold") or (cp.s>0 and "silver") or "copper"
+            local cy = r.y - sy(13)
+            draw.icon_coin(r.x+sx(7), cy+sy(4), sx(6), ctier)
+            setc(ctier=="gold" and UI.gold or ctier=="silver" and {0.82,0.85,0.9} or {0.82,0.52,0.30})
+            love.graphics.setFont(draw.font_sm); love.graphics.print(draw.coin_str(p.gold), r.x+sx(16), cy)
+        end
         -- 红点位（暂无提醒来源，预留：state.badge[id] 为真时画）
         if state.badge and state.badge[BTN_IDS[i]] then
             setc(UI.bad); love.graphics.circle("fill", r.x+r.w-sx(6), r.y+sy(5), sx(4))
