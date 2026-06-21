@@ -36,7 +36,12 @@ function input.press(x,y)
     -- 齿轮按钮(右上角常驻)：开/关系统菜单。优先于其它(但副本流程已先拦)
     do
         local gw=22*screen.sw; local gx=w-34*screen.sw; local gy=8*screen.sw
-        if hit(x,y,gx,gy,gw,gw) then state.panel_open=(state.panel_open=="system") and nil or "system"; return end
+        -- 注意：不能写 `(a=="system") and nil or "system"`——Lua 里 `true and nil` 经 or 必回 "system"，
+        -- 永远关不掉。必须显式 if/else 切换。
+        if hit(x,y,gx,gy,gw,gw) then
+            if state.panel_open=="system" then state.panel_open=nil else state.panel_open="system" end
+            return
+        end
     end
     if state.panel_open=="system" then system_view.hit(x,y); return end
     if not state.panel_open then
