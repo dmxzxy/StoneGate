@@ -450,9 +450,11 @@ end
 function love.touchpressed(id,x,y) input.press(x,y) end
 function love.touchmoved(id,x,y) input.drag_move(x,y) end
 function love.touchreleased(id,x,y) input.release(x,y) end
-function love.mousepressed(x,y,b) if b==1 then input.press(x,y) end end
-function love.mousemoved(x,y) input.drag_move(x,y) end
-function love.mousereleased(x,y,b) if b==1 then input.release(x,y) end end
+-- istouch=true 的鼠标事件是触摸的模拟回声(移动端一次点会同时触发 touch* 和 mouse*)，
+-- 忽略它们，避免 input.press 被同一次点触发两次(否则刚打开的活动抽屉立刻被"点外侧"关掉)。
+function love.mousepressed(x,y,b,istouch) if b==1 and not istouch then input.press(x,y) end end
+function love.mousemoved(x,y,dx,dy,istouch) if not istouch then input.drag_move(x,y) end end
+function love.mousereleased(x,y,b,istouch) if b==1 and not istouch then input.release(x,y) end end
 function love.wheelmoved(dx,dy) input.wheel(dx,dy) end
 function love.resize() local screen=require("base.screen"); screen.set_scale(); build_hud() end
 -- 退出强存：必须在 chunk 顶层定义，loader 才能在回调快照里捕获到（否则退出存档静默丢失）。
