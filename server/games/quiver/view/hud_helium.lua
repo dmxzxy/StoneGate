@@ -68,17 +68,19 @@ local function draw_topcard()
     setc(UI.gold); love.graphics.circle("fill", cx+sx(11), cy+ch-sy(11), sx(10))
     setc({0.1,0.09,0.05}); love.graphics.setFont(draw.font_sm)
     love.graphics.printf(p.level, cx+sx(11)-sx(10), cy+ch-sy(11)-draw.font_sm:getHeight()/2, sx(20), "center")
-    -- 头像右侧：名字 + 一行小字资源(许可/钥匙)，简洁不堆条
-    setc(UI.text); love.graphics.setFont(draw.font); love.graphics.print("弓手 Lv"..p.level, cx+cw+sx(10), sy(10))
-    love.graphics.setFont(draw.font_sm); setc({0.6,0.82,1})
-    draw.pixel_icon("license", cx+cw+sx(16), sy(36), sx(7), {0.55,0.78,0.95})
-    love.graphics.print(math.floor(p.energy or 0).."/"..math.floor(p.energy_max or 0), cx+cw+sx(26), sy(31))
+    -- 头像右侧只放名字(第二行留给各页面自己的 HUD，如采集的材料数/经验环，避免互相挤)
+    setc(UI.text); love.graphics.setFont(draw.font); love.graphics.print("弓手 Lv"..p.level, cx+cw+sx(10), sy(16))
+    -- 许可/钥匙挪到右侧(齿轮左边)，与左侧名字/各页面信息分开
+    local rx = w - sx(116)
+    love.graphics.setFont(draw.font_sm)
+    draw.pixel_icon("license", rx, sy(16), sx(7), {0.55,0.78,0.95})
+    setc({0.6,0.82,1}); love.graphics.print(math.floor(p.energy or 0).."/"..math.floor(p.energy_max or 0), rx+sx(10), sy(11))
     local keys = (inv.inv_count("mat","iron_key") or 0)+(inv.inv_count("mat","ember_key") or 0)+(inv.inv_count("mat","void_key") or 0)
-    draw.pixel_icon("key", cx+cw+sx(74), sy(36), sx(7), {0.9,0.78,0.4})
-    setc({0.95,0.85,0.5}); love.graphics.print(keys, cx+cw+sx(84), sy(31))
+    draw.pixel_icon("key", rx, sy(40), sx(7), {0.9,0.78,0.4})
+    setc({0.95,0.85,0.5}); love.graphics.print(keys, rx+sx(10), sy(35))
     -- toast 在卡片之下淡出
     if fx.toast then love.graphics.setFont(draw.font_sm); setc(fx.toast.color, math.min(1,fx.toast.timer))
-        love.graphics.printf(fx.toast.text, 0, sy(50), w-sx(10), "right") end
+        love.graphics.printf(fx.toast.text, 0, sy(58), w-sx(10), "right") end
 end
 
 -- ----------------------------------------------------------------------------

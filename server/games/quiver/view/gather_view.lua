@@ -82,13 +82,13 @@ function gather_view.draw()
             bar(node_cx-sx(46), node_feet+sy(14), sx(92), sy(4), nd.atb, {0.9,0.7,0.3})
         end
     end
-    -- 当前采集大类持有数 + 职业等级/经验环：固定贴在头像卡右侧(顶部条已精简，这里不再与三条重叠)
-    local hudx = sx(120); local hudy = sy(14)
-    icon_mat(a.mat, hudx, hudy+sy(6), sx(9)); setc(MAT_COLOR[a.mat]); love.graphics.setFont(draw.font)
-    love.graphics.print(inv.cat_count(a.mat), hudx+sx(14), hudy)
+    -- 当前采集大类持有数 + 职业等级/经验环：放在头像卡右侧"名字行下方"第二行(不压名字/许可钥匙)
+    local hudx = sx(122); local hudy = sy(38)
+    icon_mat(a.mat, hudx, hudy+sy(5), sx(8)); setc(MAT_COLOR[a.mat]); love.graphics.setFont(draw.font_sm)
+    love.graphics.print(inv.cat_count(a.mat), hudx+sx(12), hudy)
     local s = state.player.skill[key]
-    ring(hudx+sx(70), hudy+sy(6), sx(10), s.xp/gather_need(s.lvl), MAT_COLOR[a.mat])
-    love.graphics.setFont(draw.font_sm); setc(UI.text); love.graphics.printf("Lv"..s.lvl, hudx+sx(70)-sx(16), hudy+sy(2), sx(32), "center")
+    ring(hudx+sx(56), hudy+sy(5), sx(9), s.xp/gather_need(s.lvl), MAT_COLOR[a.mat])
+    love.graphics.setFont(draw.font_sm); setc(UI.text); love.graphics.printf("Lv"..s.lvl, hudx+sx(56)-sx(14), hudy+sy(1), sx(28), "center")
 end
 
 return gather_view
