@@ -59,31 +59,36 @@ function gather_view.draw()
     screen.end_scene()
 
     -- ── HUD（设计空间 480x800，像素扁平皮）──
-    local sw, sh = screen.sw, screen.sh
     local cx = love.graphics.getWidth()/2
-    -- 节点屏幕锚点（与场景里的节点对齐：场景 gy → 设计 y，节点 x 用 nd.x 设计坐标）
-    local node_dy = (gy/SH) * DESIGN_H * sh           -- 场景地面线 → 屏幕 y
+    -- 节点屏幕坐标(场景→屏幕，整数放大同 end_scene)：bar/等级用它对齐精灵，避免两套坐标错位
+    local nx_node = to_sx(nd and (nd.x or NODE_HOME_X) or NODE_HOME_X)
+    local fX = love.graphics.getWidth()/SW; local fY = love.graphics.getHeight()/SH
+    local node_cx = nx_node*fX               -- 节点屏幕 x
+    local node_feet = gy*fY                  -- 节点/主角脚下屏幕 y
+
     if (not nd) or nd.phase=="search" then
-        -- 寻找：搜索文字 + 进度条（锚在屏幕中部偏上）
+        -- 寻找：搜索文字 + 进度条（屏幕中部偏上）
         love.graphics.setFont(draw.font_med); setc(UI.dim)
-        love.graphics.printf("寻找"..(MAT_NAME[a.mat] or "").."中…", 0, node_dy-sy(150), love.graphics.getWidth(), "center")
-        bar(cx-sx(70), node_dy-sy(120), sx(140), sy(8), (nd and nd.phase_t or 0)/GATHER_SEARCH, UI.dim)
+        love.graphics.printf("寻找"..(MAT_NAME[a.mat] or "").."中…", 0, node_feet-sy(150), love.graphics.getWidth(), "center")
+        bar(cx-sx(70), node_feet-sy(120), sx(140), sy(8), (nd and nd.phase_t or 0)/GATHER_SEARCH, UI.dim)
     elseif nd.phase~="done" then
-        local nx_screen = (nd.x or NODE_HOME_X)*sw
         local okreq = state.player.skill[key].lvl >= nd.req
+        -- 等级在节点头顶
         setc(okreq and UI.text or UI.bad); love.graphics.setFont(draw.font_sm)
-        love.graphics.printf((nd.rich and "★" or "").."Lv"..nd.level, nx_screen-sx(40), node_dy-sy(80), sx(80), "center")
+        love.graphics.printf((nd.rich and "★" or "").."Lv"..nd.level, node_cx-sx(40), node_feet-sy(64), sx(80), "center")
+        -- 采集进度(耐久)+ atb 在节点脚下
         if nd.phase=="harvest" then
-            bar(nx_screen-sx(50), node_dy+sy(20), sx(100), sy(10), nd.dur/nd.max_dur, MAT_COLOR[nd.mat])
-            bar(nx_screen-sx(50), node_dy+sy(33), sx(100), sy(5), nd.atb, {0.9,0.7,0.3})
+            bar(node_cx-sx(46), node_feet+sy(4), sx(92), sy(8), nd.dur/nd.max_dur, MAT_COLOR[nd.mat])
+            bar(node_cx-sx(46), node_feet+sy(14), sx(92), sy(4), nd.atb, {0.9,0.7,0.3})
         end
     end
-    -- 顶部：材料图标 + 持有数 + 采集职业等级/经验环
-    icon_mat(a.mat, cx-sx(40), node_dy-sy(190), sx(13))
-    love.graphics.setFont(draw.font_big); setc(MAT_COLOR[a.mat]); love.graphics.print(inv.cat_count(a.mat), cx-sx(18), node_dy-sy(204))
+    -- 当前采集大类持有数 + 职业等级/经验环：固定贴在头像卡右侧(顶部条已精简，这里不再与三条重叠)
+    local hudx = sx(120); local hudy = sy(14)
+    icon_mat(a.mat, hudx, hudy+sy(6), sx(9)); setc(MAT_COLOR[a.mat]); love.graphics.setFont(draw.font)
+    love.graphics.print(inv.cat_count(a.mat), hudx+sx(14), hudy)
     local s = state.player.skill[key]
-    ring(cx+sx(40), node_dy-sy(186), sx(11), s.xp/gather_need(s.lvl), MAT_COLOR[a.mat])
-    love.graphics.setFont(draw.font_sm); setc(UI.text); love.graphics.printf("Lv"..s.lvl, cx+sx(40)-sx(16), node_dy-sy(190), sx(32), "center")
+    ring(hudx+sx(70), hudy+sy(6), sx(10), s.xp/gather_need(s.lvl), MAT_COLOR[a.mat])
+    love.graphics.setFont(draw.font_sm); setc(UI.text); love.graphics.printf("Lv"..s.lvl, hudx+sx(70)-sx(16), hudy+sy(2), sx(32), "center")
 end
 
 return gather_view
