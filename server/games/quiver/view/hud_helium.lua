@@ -76,14 +76,14 @@ local function draw_topcard()
     setc({0.1,0.09,0.05}); love.graphics.setFont(draw.font_sm)
     love.graphics.printf(p.level, cx+sx(11)-sx(10), cy+ch-sy(11)-draw.font_sm:getHeight()/2, sx(20), "center")
 
-    -- 三条：HP(最粗) / MP(中) / 经验(最细)，起点在头像右侧
-    local bx = cx+cw+sx(10); local bw = w - bx - sx(96)
+    -- 三条：HP(最粗) / MP(中) / 经验(最细)，起点在头像右侧；右端在资源列左侧留白(不压资源)
+    local bx = cx+cw+sx(10); local bw = (w - sx(112)) - bx
     bar(bx, sy(10), bw, sy(9),  p.hp/p.max_hp,        UI.good, math.floor(p.hp).."/"..math.floor(p.max_hp))
     bar(bx, sy(22), bw, sy(7),  (p.mp or 0)/(p.max_mp or 1), UI.btn, "MP "..math.floor(p.mp or 0))
     bar(bx, sy(33), bw, sy(5),  p.xp/p.xp_next,       UI.xp)
 
-    -- 右上资源列：金钱(铜银金分级显示) / 许可(energy) / 钥匙总数
-    local rx = w - sx(96)
+    -- 右上资源列：金钱(铜银金分级显示) / 许可(energy) / 钥匙总数。整体左移给齿轮(右上角)让位
+    local rx = w - sx(100)
     local cp = draw.coin_parts(p.gold)
     local ctier = (cp.g>0 and "gold") or (cp.s>0 and "silver") or "copper"
     icon_coin(rx, sy(11), sx(7), ctier)
