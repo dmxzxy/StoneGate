@@ -108,13 +108,11 @@ function combat_view.draw()
         bar(bx, fy, bw, sy(9), state.enemy.hp/state.enemy.max_hp, UI.bad, math.floor(state.enemy.hp))
         bar(bx, fy+sy(11), bw, sy(4), state.enemy.atb, {0.9,0.7,0.3})
     end
-    -- 玩家三条：锚在主角脚下(场景脚底 gy → 屏幕)
+    -- 玩家出手进度(ATB)：只在脚下画一条细条(HP/MP 已在顶部角色卡，避免重复+不挡资源条)
     local atbcol = buff_active("haste") and {0.4,0.95,0.95} or {0.4,0.7,1.0}
     local fX = love.graphics.getWidth()/SW; local fY = love.graphics.getHeight()/SH
-    local pbw = sx(108); local bx = math.floor(hx*fX - pbw/2); local by = math.floor(gy*fY + sy(6))
-    bar(bx,by,pbw,sy(11),state.player.hp/state.player.max_hp,UI.good,math.floor(state.player.hp).."/"..state.player.max_hp)
-    bar(bx,by+sy(13),pbw,sy(8),(state.player.mp or 0)/(state.player.max_mp or 1),{0.35,0.55,0.95},"MP "..math.floor(state.player.mp or 0))
-    bar(bx,by+sy(23),pbw,sy(4),state.player.atb,atbcol)
+    local pbw = sx(72); local bx = math.floor(hx*fX - pbw/2); local by = math.floor(gy*fY + sy(6))
+    bar(bx,by,pbw,sy(5),state.player.atb,atbcol)
     -- 技能栏：横排已学技能 + 冷却环 + 释放白闪
     local n=#state.player.skills; local sz=sx(16); local gap=sx(10); local total=n*(sz*2)+(n-1)*gap
     local sx0=(love.graphics.getWidth()-total)/2; local sy0=sy(700)

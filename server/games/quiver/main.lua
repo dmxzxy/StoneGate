@@ -67,6 +67,11 @@ local roll_gear = inv.roll_gear
 local inv_add, ammo_add = inv.inv_add, inv.ammo_add
 local recalc, xp_need = prog.recalc, prog.xp_need
 
+-- 前向声明：update() 里(重置/退出)要用 save 与 init，但它们定义在下方 → 先声明 local，
+-- 后面用 `function init()` / `save = {}`（不带 local）填充同一个 upvalue。
+local init
+local save
+
 -- ============================================================================
 -- 主循环：通用推进（特效/冷却/mp/活动 tick）串起战斗 tick。规则逻辑全在 sys/。
 -- ============================================================================
@@ -123,7 +128,7 @@ end
 -- ============================================================================
 -- 初始化
 -- ============================================================================
-local function init()
+function init()
     state.player = { level=1, xp=0, xp_next=xp_need(1), base_str=5, base_agi=5, base_sta=5,
         gold=0, hp=nil, mp=nil, equip={}, inv={}, ammo={}, ammo_cap=0, atb=0,
         -- 探险许可(副本进入成本，随时间恢复；离线靠 last_time 折算)
@@ -161,7 +166,7 @@ end
 -- 只存 base_* 与"账本"，衍生态交给 recalc()，瞬时态交给 init/状态机重建；引用只存 id。
 -- ============================================================================
 -- 收进单个 save 表（避免主 chunk 触及 Lua 200 局部变量上限；文件拆分后会移到 base/save.lua）
-local save = {}
+save = {}
 save.FILE = "quiver/save.lua"
 save.VERSION = 9
 local save_timer = 0
