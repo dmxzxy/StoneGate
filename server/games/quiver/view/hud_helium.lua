@@ -99,17 +99,17 @@ local function draw_bottombar()
         love.graphics.setColor(0,0,0,0.22); draw.rrect("fill", r.x, r.y+r.h-sy(3), r.w, sy(3), sx(6))
         -- 图标在上
         btn_icon(BTN_IDS[i], r.x+r.w/2, r.y+sy(11), sy(8), {0.96,0.96,1})
-        -- 文字在下
-        love.graphics.setFont(draw.font_sm); setc(UI.text)
-        love.graphics.printf(lbl[1], r.x, r.y+r.h-sy(15), r.w, "center")
-        -- 背包按钮上方挂金币(铜银金分级)：钱包归在背包入口
+        -- 文字在下；背包按钮把文字换成金币(铜银金)，钱包归背包入口、收进按钮内不占上方(避免压经验条)
         if BTN_IDS[i]=="bag" then
             local cp = draw.coin_parts(p.gold)
             local ctier = (cp.g>0 and "gold") or (cp.s>0 and "silver") or "copper"
-            local cy = r.y - sy(13)
-            draw.icon_coin(r.x+sx(7), cy+sy(4), sx(6), ctier)
+            local cyt = r.y+r.h-sy(15)
+            draw.icon_coin(r.x+sx(8), cyt+sy(5), sx(5), ctier)
             setc(ctier=="gold" and UI.gold or ctier=="silver" and {0.82,0.85,0.9} or {0.82,0.52,0.30})
-            love.graphics.setFont(draw.font_sm); love.graphics.print(draw.coin_str(p.gold), r.x+sx(16), cy)
+            love.graphics.setFont(draw.font_sm); love.graphics.print(draw.coin_str(p.gold), r.x+sx(16), cyt)
+        else
+            love.graphics.setFont(draw.font_sm); setc(UI.text)
+            love.graphics.printf(lbl[1], r.x, r.y+r.h-sy(15), r.w, "center")
         end
         -- 红点位（暂无提醒来源，预留：state.badge[id] 为真时画）
         if state.badge and state.badge[BTN_IDS[i]] then

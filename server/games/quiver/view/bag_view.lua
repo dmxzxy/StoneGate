@@ -95,7 +95,14 @@ function bag_view.draw()
     local px,py,pw,ph,gx,gy,cell,gap = bag_grid(); panel(px,py,pw,ph,{0.09,0.1,0.15,0.98},UI.line,10*sw)
     love.graphics.setFont(draw.font_med); setc(UI.text); love.graphics.printf("背包",px,py+sy(8),pw,"center")
     draw.close_x(px,py,pw)
-
+    -- 标题左侧显示持有金币(铜银金)
+    do
+        local cp = draw.coin_parts(state.player.gold)
+        local ctier = (cp.g>0 and "gold") or (cp.s>0 and "silver") or "copper"
+        draw.icon_coin(px+sx(20), py+sy(16), sx(6), ctier)
+        setc(ctier=="gold" and UI.gold or ctier=="silver" and {0.82,0.85,0.9} or {0.82,0.52,0.30})
+        love.graphics.setFont(draw.font_sm); love.graphics.print(draw.coin_str(state.player.gold), px+sx(30), py+sy(11))
+    end
     -- 筛选 tab（仅降非当前类透明度，不重排）
     local cur_f = state.bag_filter or "all"
     for i,f in ipairs(BAG_FILTERS) do
